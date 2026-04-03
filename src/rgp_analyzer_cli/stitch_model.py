@@ -45,6 +45,9 @@ def _stream_stats(stream_markers: list[dict[str, Any]]) -> dict[str, int]:
             if marker.get("kind") == "CB_END"
         ),
         "barrier_marker_count": sum(len(stream.get("barrier_markers", [])) for stream in stream_markers),
+        "barrier_span_stream_count": sum(1 for stream in stream_markers if stream.get("barrier_spans")),
+        "barrier_span_count": sum(len(stream.get("barrier_spans", [])) for stream in stream_markers),
+        "unmatched_barrier_begin_count": sum(len(stream.get("unmatched_barrier_begins", [])) for stream in stream_markers),
         "barrier_start_marker_count": sum(
             1
             for stream in stream_markers

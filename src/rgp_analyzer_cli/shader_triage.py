@@ -171,10 +171,16 @@ def _triage_findings(
     if decode_stream:
         instructions = decode_stream.get("instructions", 0)
         cats = decode_stream.get("category_counts", {})
+        runtime_profile = decode_stream.get("runtime_profile") or {}
         valu = cats.get("VALU", 0)
         vmem = cats.get("VMEM", 0)
         smem = cats.get("SMEM", 0)
         lds = cats.get("LDS", 0)
+        stall_share = runtime_profile.get("stall_share_of_duration")
+        avg_stall = runtime_profile.get("avg_stall_per_inst")
+        top_category_profiles = runtime_profile.get("category_profiles") or []
+        top_wave_states = runtime_profile.get("wave_state_profiles") or []
+        runtime_hotspots = decode_stream.get("runtime_hotspot_profiles") or []
         if instructions:
             if valu / instructions >= 0.85:
                 findings.append(f"Runtime trace is overwhelmingly VALU-bound: VALU={valu}/{instructions}.")
@@ -182,6 +188,42 @@ def _triage_findings(
                 findings.append(f"Runtime trace includes visible memory operations: VMEM+SMEM={vmem + smem}/{instructions}.")
             if lds > 0:
                 findings.append(f"Runtime trace contains LDS operations: LDS={lds}/{instructions}.")
+        if isinstance(stall_share, (int, float)):
+            findings.append(f"Runtime instruction stall accounts for {stall_share:.2f} of decoded instruction duration.")
+        if isinstance(avg_stall, (int, float)):
+            findings.append(f"Average decoded instruction stall is {avg_stall:.2f} cycles.")
+        if top_category_profiles:
+            top_category = top_category_profiles[0]
+            share = top_category.get("stall_share_of_duration")
+            share_text = f" stall_share={share:.2f}" if isinstance(share, (int, float)) else ""
+            findings.append(
+                f"Top runtime instruction category is {top_category.get('category')}: "
+                f"count={top_category.get('count')} stall_total={top_category.get('stall_total')} "
+                f"duration_total={top_category.get('duration_total')}{share_text}."
+            )
+        if top_wave_states:
+            top_state = top_wave_states[0]
+            share = top_state.get("share")
+            share_text = f" share={share:.2f}" if isinstance(share, (int, float)) else ""
+            findings.append(
+                f"Dominant decoded wave state is {top_state.get('state')}: duration={top_state.get('duration')}{share_text}."
+            )
+        if runtime_hotspots:
+            top_hotspot = runtime_hotspots[0]
+            symbol = top_hotspot.get("symbol") or {}
+            symbol_text = ""
+            if symbol.get("name"):
+                symbol_text = f" {symbol.get('name')}+0x{int(symbol.get('offset', 0) or 0):x}"
+            stall_share = top_hotspot.get("stall_share_of_duration")
+            stall_share_text = f" stall_share={stall_share:.2f}" if isinstance(stall_share, (int, float)) else ""
+            findings.append(
+                f"Top decoded runtime PC is 0x{int(top_hotspot.get('address', 0) or 0):x}:{symbol_text}"
+                f" duration={int(top_hotspot.get('total_duration', 0) or 0)}"
+                f" stall={int(top_hotspot.get('total_stall', 0) or 0)}"
+                f" hitcount={int(top_hotspot.get('hitcount', 0) or 0)}{stall_share_text}."
+            )
+            if len(runtime_hotspots) > 1:
+                findings.append(f"Decoded runtime hotspot ranking currently covers {len(runtime_hotspots)} PCs in the sampled stream.")
         hotspots = decode_stream.get("annotated_hotspots") or decode_stream.get("hotspots") or []
         if hotspots:
             top = hotspots[0]
@@ -238,9 +280,20 @@ def _triage_findings(
             findings.append(
                 "Decoder diagnostics suggest this capture is missing the code-object instrumentation expected by rocprof trace decode."
             )
+        if decode_diagnostics.get("sparse_runtime_trace"):
+            findings.append(
+                "Decoded runtime trace is sparse: SQTT payload exists, but queue events, decoded instructions, and hotspot records are absent."
+            )
         info_counts = decode_diagnostics.get("info_counts") or {}
         if info_counts:
             findings.append(f"Decoder info records: {info_counts}.")
+        total_sqtt = int(decode_diagnostics.get("total_sqtt_trace_bytes", 0) or 0)
+        total_instructions = int(decode_diagnostics.get("total_instructions", 0) or 0)
+        queue_event_count = int(decode_diagnostics.get("queue_event_count", 0) or 0)
+        if total_sqtt > 0 and total_instructions == 0 and queue_event_count == 0:
+            findings.append(
+                "SQTT payload is present but runtime dispatch/instruction evidence is absent; command-stream organization is likely diluting the trace."
+            )
         dispatch_isa_overview = stitched_decode.get("dispatch_isa_overview") or {}
         if dispatch_isa_overview:
             mapped = int(dispatch_isa_overview.get("mapped_dispatch_count", 0) or 0)
@@ -290,6 +343,8 @@ def _triage_findings(
         cb_start_markers = int(stitch_model.get("cb_start_marker_count", 0))
         cb_end_markers = int(stitch_model.get("cb_end_marker_count", 0))
         barrier_markers = int(stitch_model.get("barrier_marker_count", 0))
+        barrier_spans = int(stitch_model.get("barrier_span_count", 0))
+        unmatched_barrier_begins = int(stitch_model.get("unmatched_barrier_begin_count", 0))
         userdata_signature = stitch_model.get("tinygrad_userdata_signature")
         rocprof_instrumentation = stitch_model.get("rocprof_instrumentation") or {}
         if resolved:
@@ -359,6 +414,10 @@ def _triage_findings(
             findings.append(f".rgp stitch model sees CB_START={cb_start_markers} and CB_END={cb_end_markers}.")
         if barrier_markers:
             findings.append(f".rgp stitch model also recovers {barrier_markers} barrier markers.")
+        if barrier_spans:
+            findings.append(f".rgp stitch model pairs {barrier_spans} barrier spans.")
+        if unmatched_barrier_begins:
+            findings.append(f".rgp stitch model still has {unmatched_barrier_begins} unmatched barrier begin markers.")
         if userdata_signature:
             findings.append(
                 f"tinygrad packet decode infers userdata marker writes via hi_byte={userdata_signature['hi_byte']} subop={userdata_signature['subop']}."
@@ -484,6 +543,8 @@ def _build_summary(
 
     if decode_stream:
         cats = decode_stream.get("category_counts") or {}
+        runtime_profile = decode_stream.get("runtime_profile") or {}
+        runtime_hotspots = decode_stream.get("runtime_hotspot_profiles") or []
         summary["runtime"] = {
             "instructions": decode_stream.get("instructions"),
             "waves": decode_stream.get("waves"),
@@ -494,7 +555,56 @@ def _build_summary(
                 "VMEM": cats.get("VMEM", 0),
                 "SMEM": cats.get("SMEM", 0),
             },
+            "avg_stall_per_inst": runtime_profile.get("avg_stall_per_inst"),
+            "stall_share_of_duration": runtime_profile.get("stall_share_of_duration"),
+            "stalled_instruction_share": runtime_profile.get("stalled_instruction_share"),
+            "occupancy_average_active": runtime_profile.get("occupancy_average_active"),
+            "occupancy_max_active": runtime_profile.get("occupancy_max_active"),
+            "avg_wave_lifetime": runtime_profile.get("avg_wave_lifetime"),
         }
+        category_profiles = runtime_profile.get("category_profiles") or []
+        if category_profiles:
+            top = category_profiles[0]
+            summary["runtime"]["top_category"] = {
+                "category": top.get("category"),
+                "count": top.get("count"),
+                "duration_total": top.get("duration_total"),
+                "stall_total": top.get("stall_total"),
+                "stall_share_of_duration": top.get("stall_share_of_duration"),
+            }
+        wave_state_profiles = runtime_profile.get("wave_state_profiles") or []
+        if wave_state_profiles:
+            top = wave_state_profiles[0]
+            summary["runtime"]["top_wave_state"] = {
+                "state": top.get("state"),
+                "duration": top.get("duration"),
+                "share": top.get("share"),
+            }
+        if runtime_hotspots:
+            top = runtime_hotspots[0]
+            summary["runtime"]["top_hotspot_profile"] = {
+                "address": top.get("address"),
+                "total_duration": top.get("total_duration"),
+                "total_stall": top.get("total_stall"),
+                "hitcount": top.get("hitcount"),
+                "avg_duration_per_hit": top.get("avg_duration_per_hit"),
+                "avg_stall_per_hit": top.get("avg_stall_per_hit"),
+                "stall_share_of_duration": top.get("stall_share_of_duration"),
+                "symbol": top.get("symbol"),
+            }
+            summary["runtime"]["top_hotspot_profiles"] = [
+                {
+                    "address": item.get("address"),
+                    "total_duration": item.get("total_duration"),
+                    "total_stall": item.get("total_stall"),
+                    "hitcount": item.get("hitcount"),
+                    "avg_duration_per_hit": item.get("avg_duration_per_hit"),
+                    "avg_stall_per_hit": item.get("avg_stall_per_hit"),
+                    "stall_share_of_duration": item.get("stall_share_of_duration"),
+                    "symbol": item.get("symbol"),
+                }
+                for item in runtime_hotspots[:4]
+            ]
         hotspots = decode_stream.get("annotated_hotspots") or decode_stream.get("hotspots") or []
         if hotspots:
             top = hotspots[0]
@@ -530,8 +640,40 @@ def _build_summary(
             "code_object_count": decode_json.get("code_object_count"),
             "code_object_load_failures": decode_json.get("code_object_load_failures"),
             "likely_missing_codeobj_instrumentation": diagnostics.get("likely_missing_codeobj_instrumentation"),
+            "sparse_runtime_trace": diagnostics.get("sparse_runtime_trace"),
             "dispatch_isa_mapped": dispatch_overview.get("mapped_dispatch_count"),
             "dispatch_isa_total": dispatch_overview.get("dispatch_count"),
+        }
+        dispatch_span_count = 0
+        if stitch_model:
+            dispatch_span_count = int(stitch_model.get("dispatch_api_span_count", 0) or 0)
+        queue_event_count = int(diagnostics.get("queue_event_count", 0) or 0)
+        sqtt_trace_bytes = int(diagnostics.get("total_sqtt_trace_bytes", 0) or 0)
+        decoded_instruction_count = int(diagnostics.get("total_instructions", 0) or 0)
+        decoded_wave_count = int(diagnostics.get("total_waves", 0) or 0)
+        mapped_dispatch_count = int(dispatch_overview.get("mapped_dispatch_count", 0) or 0)
+        total_dispatch_count = int(dispatch_overview.get("dispatch_count", 0) or 0)
+        if sqtt_trace_bytes <= 0:
+            runtime_evidence_level = "no_sqtt"
+        elif bool(diagnostics.get("sparse_runtime_trace")):
+            runtime_evidence_level = "resource_only"
+        elif mapped_dispatch_count > 0:
+            runtime_evidence_level = "dispatch_isa"
+        elif decoded_instruction_count > 0 or queue_event_count > 0:
+            runtime_evidence_level = "decoded_runtime"
+        elif dispatch_span_count > 0:
+            runtime_evidence_level = "marker_only"
+        else:
+            runtime_evidence_level = "resource_only"
+        summary["trace_quality"] = {
+            "runtime_evidence_level": runtime_evidence_level,
+            "queue_event_count": queue_event_count,
+            "sqtt_trace_bytes": sqtt_trace_bytes,
+            "decoded_instruction_count": decoded_instruction_count,
+            "decoded_wave_count": decoded_wave_count,
+            "dispatch_span_count": dispatch_span_count,
+            "mapped_dispatch_count": mapped_dispatch_count,
+            "total_dispatch_count": total_dispatch_count,
         }
 
     if stitch_model:
@@ -543,6 +685,8 @@ def _build_summary(
             "bind_marker_count": stitch_model.get("bind_marker_count"),
             "command_buffer_span_count": stitch_model.get("command_buffer_span_count"),
             "barrier_marker_count": stitch_model.get("barrier_marker_count"),
+            "barrier_span_count": stitch_model.get("barrier_span_count"),
+            "unmatched_barrier_begin_count": stitch_model.get("unmatched_barrier_begin_count"),
             "dominant_dispatch_code_object_index": stitch_model.get("dominant_dispatch_code_object_index"),
             "dominant_dispatch_code_object_share": stitch_model.get("dominant_dispatch_code_object_share"),
         }
@@ -563,6 +707,42 @@ def _build_summary(
                 "operands": top.get("operands"),
                 "count": top.get("count"),
             }
+            summary["dispatch_isa"]["top_pcs"] = [
+                {
+                    "code_object_index": item.get("code_object_index"),
+                    "pc": item.get("pc"),
+                    "mnemonic": item.get("mnemonic"),
+                    "operands": item.get("operands"),
+                    "category": item.get("category"),
+                    "count": item.get("count"),
+                }
+                for item in overall[:6]
+            ]
+
+    constraints: dict[str, Any] = {}
+    trace_quality = summary.get("trace_quality") or {}
+    decoder = summary.get("decoder") or {}
+    runtime_level = trace_quality.get("runtime_evidence_level")
+    sqtt_bytes = int(trace_quality.get("sqtt_trace_bytes") or 0)
+    dispatch_spans = int(trace_quality.get("dispatch_span_count") or 0)
+    decoded_instructions = int(trace_quality.get("decoded_instruction_count") or 0)
+    sparse_runtime_trace = bool(decoder.get("sparse_runtime_trace"))
+    if runtime_level == "resource_only" and sqtt_bytes > 0:
+        constraints["submit_dilution_suspected"] = True
+        constraints["reason"] = "sqtt_present_but_no_dispatch_or_instruction_evidence"
+        constraints["sqtt_trace_bytes"] = sqtt_bytes
+        constraints["dispatch_span_count"] = dispatch_spans
+        constraints["decoded_instruction_count"] = decoded_instructions
+    elif runtime_level == "dispatch_isa":
+        constraints["submit_dilution_suspected"] = False
+        constraints["reason"] = "dispatch_level_runtime_evidence_present"
+        constraints["sqtt_trace_bytes"] = sqtt_bytes
+        constraints["dispatch_span_count"] = dispatch_spans
+        constraints["decoded_instruction_count"] = decoded_instructions
+    if sparse_runtime_trace:
+        constraints["sparse_runtime_trace"] = True
+    if constraints:
+        summary["profiling_constraints"] = constraints
 
     return summary
 

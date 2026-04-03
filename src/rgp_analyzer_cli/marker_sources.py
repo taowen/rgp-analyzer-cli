@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .api_context import (
+    pair_barrier_spans,
     pair_command_buffer_spans,
     pair_stream_api_spans,
     summarize_stream_api_lifecycle,
@@ -240,6 +241,7 @@ def collect_stream_marker_context(report: dict[str, Any]) -> dict[str, Any]:
         )
         command_context = summarize_stream_command_context(command_buffer_markers, barrier_markers)
         command_spans = pair_command_buffer_spans(command_buffer_markers)
+        barrier_spans = pair_barrier_spans(barrier_markers)
         api_summary = summarize_stream_api_phases(api_markers)
         api_lifecycle = summarize_stream_api_lifecycle(api_markers)
         api_spans = pair_stream_api_spans(api_markers)
@@ -257,6 +259,8 @@ def collect_stream_marker_context(report: dict[str, Any]) -> dict[str, Any]:
                 "command_buffer_ids": command_context["command_buffer_ids"],
                 "command_buffer_spans": command_spans["command_buffer_spans"],
                 "unmatched_command_buffer_begins": command_spans["unmatched_command_buffer_begins"],
+                "barrier_spans": barrier_spans["barrier_spans"],
+                "unmatched_barrier_begins": barrier_spans["unmatched_barrier_begins"],
                 "api_marker_summary": api_summary,
                 "api_lifecycle": api_lifecycle,
                 "api_spans": api_spans["api_spans"],

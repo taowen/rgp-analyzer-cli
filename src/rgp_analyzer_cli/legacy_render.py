@@ -72,7 +72,7 @@ def render_inspect(report: dict[str, Any], limit: int = 10) -> str:
         ]
     )
 
-    lines.extend(["", "advice:"])
+    lines.extend(["", "notes:"])
     for item in generate_advice(report):
         lines.append(f"  - {item}")
 
@@ -158,7 +158,7 @@ def render_loader_events(report: dict[str, Any], limit: int) -> str:
 
 
 def render_advice(report: dict[str, Any]) -> str:
-    lines = ["advice:"]
+    lines = ["notes:"]
     for item in generate_advice(report):
         lines.append(f"  - {item}")
     return "\n".join(lines)

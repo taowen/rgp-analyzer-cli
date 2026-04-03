@@ -1,0 +1,50 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer BufferA {
+    uint data_a[];
+};
+
+layout(set = 0, binding = 1) buffer BufferB {
+    uint data_b[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint element_count;
+    uint iteration;
+    uint phase;
+    uint scale;
+} pc;
+
+uint wrapped_index(uint base, uint delta, uint count) {
+    return (base + delta) & (count - 1u);
+}
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= pc.element_count) {
+        return;
+    }
+
+    uint acc = 0u;
+    uint b = data_b[index];
+    for (uint i = 0; i < pc.scale; ++i) {
+        uint i0 = wrapped_index(index, i * 17u + 1u, pc.element_count);
+        uint i1 = wrapped_index(index, i * 29u + 5u, pc.element_count);
+        uint i2 = wrapped_index(index, i * 43u + 9u, pc.element_count);
+        uint i3 = wrapped_index(index, i * 59u + 13u, pc.element_count);
+
+        uint a0 = data_a[i0];
+        uint a1 = data_a[i1];
+        uint a2 = data_a[i2];
+        uint a3 = data_a[i3];
+        uint b0 = data_b[i1];
+        uint b1 = data_b[i3];
+
+        acc ^= ((a0 << 3) | (a1 >> 5)) + ((a2 << 7) | (a3 >> 11));
+        acc += (b0 * 33u) ^ (b1 * 17u) ^ (pc.iteration + i);
+        b ^= (acc << 9) | (acc >> 23);
+    }
+    data_b[index] = acc ^ b;
+}

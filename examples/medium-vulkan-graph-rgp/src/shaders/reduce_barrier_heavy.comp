@@ -1,0 +1,60 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer BufferA {
+    uint data_a[];
+};
+
+layout(set = 0, binding = 1) readonly buffer BufferB {
+    uint data_b[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint element_count;
+    uint iteration;
+    uint phase;
+    uint scale;
+} pc;
+
+shared uint scratch0[64];
+shared uint scratch1[64];
+shared uint scratch2[64];
+shared uint scratch3[64];
+
+void main() {
+    uint local_index = gl_LocalInvocationIndex;
+    uint group_base = gl_WorkGroupID.x * 64u;
+    uint index = group_base + local_index;
+
+    uint value = 0u;
+    if (index < pc.element_count) {
+        value = data_b[index] ^ (pc.iteration + 1u);
+    }
+
+    scratch0[local_index] = value;
+    scratch1[local_index] = value ^ 0x9e3779b9u;
+    scratch2[local_index] = value + 0x7f4a7c15u;
+    scratch3[local_index] = value ^ local_index;
+    barrier();
+
+    for (uint round = 0u; round < 2u; ++round) {
+        for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+            if (local_index < stride) {
+                scratch0[local_index] += scratch0[local_index + stride];
+                scratch1[local_index] ^= scratch1[local_index + stride];
+                scratch2[local_index] += scratch2[local_index + stride] ^ scratch1[local_index];
+                scratch3[local_index] ^= scratch3[local_index + stride] + scratch2[local_index];
+            }
+            barrier();
+        }
+        if (local_index == 0u) {
+            scratch0[0] ^= scratch1[0] + scratch2[0] + scratch3[0] + round;
+        }
+        barrier();
+    }
+
+    if (local_index == 0u && group_base < pc.element_count) {
+        data_a[group_base] ^= scratch0[0];
+    }
+}

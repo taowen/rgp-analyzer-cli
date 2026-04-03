@@ -75,6 +75,17 @@ Heavy commands (`decode-sqtt`, `dispatch-isa-map`, `shader-triage`) now cache JS
 
 - `shader-triage`
   Highest-level signal summary. Combines runtime SQTT, ISA summary, resource metadata, and stitch facts into a compact report.
+  It now also reports `trace_quality.runtime_evidence_level`, so sparse real-model captures can be identified quickly.
+
+- `shader-focus`
+  Shader-tuning view for the hottest code object in a capture. It compresses the current capture to:
+  `VGPR / SGPR / LDS / scratch`, runtime stall and occupancy, top hotspot cost, top dispatch-ISA PCs, and runtime proxies such as
+  `global_mem`, `lds`, `sync_wait`, and `IMMED`-heavy behavior.
+  The runtime summary is still capture-global; the most shader-specific evidence is the focused hotspot bucket plus `top_pcs`.
+
+- `compare-shader-focus`
+  A/B compare for shader work. It keeps the compare centered on the focused code object and highlights whether the candidate:
+  changes occupancy, sync-wait pressure, LDS-heavy behavior, average stall, or hotspot cost per hit.
 
 - `dispatch-isa-map`
   Uses the `.rgp` stitch model plus vendored raw SQTT decode to recover dispatch-segment ISA evidence without relying on an external `tinygrad` checkout.
@@ -146,5 +157,6 @@ If I am tuning a compute shader, the shortest useful loop is:
 3. run `decode-sqtt`
 4. run `resource-summary`
 5. run `shader-triage`
-6. if still ambiguous, inspect dispatch-level ISA evidence with `dispatch-isa-map`
-7. if that is still not enough, open RGP or hand the ELF to RGA
+6. use `shader-focus` or `compare-shader-focus` when changing a shader or backend heuristic
+7. if still ambiguous, inspect dispatch-level ISA evidence with `dispatch-isa-map`
+8. if that is still not enough, open RGP or hand the ELF to RGA

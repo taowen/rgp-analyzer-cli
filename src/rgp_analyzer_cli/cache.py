@@ -6,7 +6,7 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
-CACHE_SCHEMA_VERSION = 2
+CACHE_SCHEMA_VERSION = 9
 
 
 def repo_root() -> Path:

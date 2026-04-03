@@ -11,9 +11,11 @@ from .native_decode import default_decoder_lib_dir, repo_root as decode_repo_roo
 from .parser import parse_rgp
 from .resource_metadata import extract_resource_metadata
 from .shader_triage import shader_triage
+from .shader_focus import build_shader_focus_payload, compare_shader_focus_payloads
 from .tinygrad_support.isa_map import map_dispatch_spans_to_isa
+from .capture_compare import compare_triage_payloads
 
-from .models import CaptureSession, DecodeOptions, DispatchIsaOptions, TriageOptions
+from .models import CaptureSession, CompareOptions, DecodeOptions, DispatchIsaOptions, ShaderFocusOptions, TriageOptions
 
 
 _TEMP_DECODE_DIR_RE = re.compile(r"/tmp/rgp-analyzer-decode-[^/]+")
@@ -145,4 +147,106 @@ def triage_payload(session: CaptureSession, options: TriageOptions) -> dict[str,
     )
     if options.use_cache:
         store_json_cache(command="shader-triage", capture=session.path, options=options, payload=payload)
+    return payload
+
+
+def compare_capture_payload(
+    baseline: CaptureSession,
+    candidate: CaptureSession,
+    options: CompareOptions,
+) -> dict[str, Any]:
+    baseline_payload = triage_payload(
+        baseline,
+        TriageOptions(
+            build_helper=options.build_helper,
+            helper=options.helper,
+            decoder_lib_dir=options.decoder_lib_dir,
+            isa_tool=options.isa_tool,
+            readelf_tool=options.readelf_tool,
+            limit=options.limit,
+            hotspot_limit=options.hotspot_limit,
+            use_cache=options.use_cache,
+        ),
+    )
+    candidate_payload = triage_payload(
+        candidate,
+        TriageOptions(
+            build_helper=options.build_helper,
+            helper=options.helper,
+            decoder_lib_dir=options.decoder_lib_dir,
+            isa_tool=options.isa_tool,
+            readelf_tool=options.readelf_tool,
+            limit=options.limit,
+            hotspot_limit=options.hotspot_limit,
+            use_cache=options.use_cache,
+        ),
+    )
+    payload = compare_triage_payloads(baseline_payload, candidate_payload)
+    payload["baseline_file"] = str(baseline.path)
+    payload["candidate_file"] = str(candidate.path)
+    return payload
+
+
+def shader_focus_payload(session: CaptureSession, options: ShaderFocusOptions) -> dict[str, Any]:
+    triage = triage_payload(
+        session,
+        TriageOptions(
+            build_helper=options.build_helper,
+            helper=options.helper,
+            decoder_lib_dir=options.decoder_lib_dir,
+            isa_tool=options.isa_tool,
+            readelf_tool=options.readelf_tool,
+            limit=options.limit,
+            hotspot_limit=options.hotspot_limit,
+            use_cache=options.use_cache,
+        ),
+    )
+    resources = resource_payload(session, limit=options.limit, tool=options.readelf_tool)
+    payload = build_shader_focus_payload(
+        triage,
+        resources,
+        code_object_index=options.code_object_index,
+        report=session.report,
+        isa_tool=options.isa_tool,
+    )
+    payload["file"] = str(session.path)
+    return payload
+
+
+def compare_shader_focus_payload(
+    baseline: CaptureSession,
+    candidate: CaptureSession,
+    options: CompareOptions,
+) -> dict[str, Any]:
+    baseline_payload = shader_focus_payload(
+        baseline,
+        ShaderFocusOptions(
+            build_helper=options.build_helper,
+            helper=options.helper,
+            decoder_lib_dir=options.decoder_lib_dir,
+            isa_tool=options.isa_tool,
+            readelf_tool=options.readelf_tool,
+            limit=options.limit,
+            hotspot_limit=options.hotspot_limit,
+            code_object_index=options.code_object_index,
+            use_cache=options.use_cache,
+        ),
+    )
+    candidate_payload = shader_focus_payload(
+        candidate,
+        ShaderFocusOptions(
+            build_helper=options.build_helper,
+            helper=options.helper,
+            decoder_lib_dir=options.decoder_lib_dir,
+            isa_tool=options.isa_tool,
+            readelf_tool=options.readelf_tool,
+            limit=options.limit,
+            hotspot_limit=options.hotspot_limit,
+            code_object_index=options.code_object_index,
+            use_cache=options.use_cache,
+        ),
+    )
+    payload = compare_shader_focus_payloads(baseline_payload, candidate_payload)
+    payload["baseline_file"] = str(baseline.path)
+    payload["candidate_file"] = str(candidate.path)
     return payload

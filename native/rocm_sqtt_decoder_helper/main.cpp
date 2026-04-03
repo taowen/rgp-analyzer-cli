@@ -56,7 +56,21 @@ struct StreamSummary {
     uint64_t perf_events = 0;
     uint64_t shaderdata_records = 0;
     uint64_t realtime_records = 0;
+    uint64_t occupancy_max_active = 0;
+    int64_t occupancy_begin_time = 0;
+    int64_t occupancy_end_time = 0;
+    int64_t occupancy_weighted_time = 0;
+    uint64_t occupancy_current_active = 0;
+    bool occupancy_initialized = false;
+    uint64_t instructions_with_stall = 0;
+    int64_t total_instruction_duration = 0;
+    int64_t total_instruction_stall = 0;
+    int64_t total_wave_lifetime = 0;
+    int64_t max_wave_lifetime = 0;
     std::map<std::string, uint64_t> category_counts;
+    std::map<std::string, int64_t> category_duration_totals;
+    std::map<std::string, int64_t> category_stall_totals;
+    std::map<std::string, int64_t> wave_state_durations;
     std::map<std::string, uint64_t> info_counts;
     std::vector<Hotspot> hotspots;
 };
@@ -140,6 +154,17 @@ const char* category_name(uint32_t category) {
     }
 }
 
+const char* wave_state_name(int32_t type) {
+    switch(type) {
+        case ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_EMPTY: return "EMPTY";
+        case ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_IDLE: return "IDLE";
+        case ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_EXEC: return "EXEC";
+        case ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_WAIT: return "WAIT";
+        case ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_STALL: return "STALL";
+        default: return "UNKNOWN";
+    }
+}
+
 void flush_hotspots(DecodeContext& ctx) {
     ctx.summary->hotspots.clear();
     for(const auto& entry : ctx.hotspot_map) ctx.summary->hotspots.push_back(entry.second);
@@ -167,8 +192,19 @@ void decode_callback(rocprofiler_thread_trace_decoder_record_type_t record_type_
             auto* events = static_cast<rocprofiler_thread_trace_decoder_occupancy_t*>(trace_events);
             summary.occupancy_records += trace_size;
             for(uint64_t i = 0; i < trace_size; ++i) {
+                if(summary.occupancy_initialized) {
+                    const auto delta = static_cast<int64_t>(events[i].time) - summary.occupancy_end_time;
+                    if(delta > 0) summary.occupancy_weighted_time += delta * static_cast<int64_t>(summary.occupancy_current_active);
+                } else {
+                    summary.occupancy_begin_time = static_cast<int64_t>(events[i].time);
+                    summary.occupancy_initialized = true;
+                }
+                summary.occupancy_end_time = static_cast<int64_t>(events[i].time);
                 if(events[i].start) ++summary.occupancy_starts;
                 else ++summary.occupancy_ends;
+                if(events[i].start) ++summary.occupancy_current_active;
+                else if(summary.occupancy_current_active > 0) --summary.occupancy_current_active;
+                summary.occupancy_max_active = std::max(summary.occupancy_max_active, summary.occupancy_current_active);
             }
             break;
         }
@@ -183,9 +219,24 @@ void decode_callback(rocprofiler_thread_trace_decoder_record_type_t record_type_
                 const auto& wave = waves[w];
                 summary.timeline_events += wave.timeline_size;
                 summary.instructions += wave.instructions_size;
+                const auto wave_lifetime = wave.end_time - wave.begin_time;
+                if(wave_lifetime > 0) {
+                    summary.total_wave_lifetime += wave_lifetime;
+                    summary.max_wave_lifetime = std::max(summary.max_wave_lifetime, wave_lifetime);
+                }
+                for(uint64_t t = 0; t < wave.timeline_size; ++t) {
+                    const auto& state = wave.timeline_array[t];
+                    summary.wave_state_durations[wave_state_name(state.type)] += state.duration;
+                }
                 for(uint64_t i = 0; i < wave.instructions_size; ++i) {
                     const auto& inst = wave.instructions_array[i];
-                    ++summary.category_counts[category_name(inst.category)];
+                    const auto* cat_name = category_name(inst.category);
+                    ++summary.category_counts[cat_name];
+                    summary.category_duration_totals[cat_name] += inst.duration;
+                    summary.category_stall_totals[cat_name] += inst.stall;
+                    summary.total_instruction_duration += inst.duration;
+                    summary.total_instruction_stall += inst.stall;
+                    if(inst.stall > 0) ++summary.instructions_with_stall;
                     auto& hotspot = ctx->hotspot_map[{inst.pc.code_object_id, inst.pc.address}];
                     hotspot.code_object_id = inst.pc.code_object_id;
                     hotspot.address = inst.pc.address;
@@ -244,6 +295,7 @@ std::string format_summary_text(const std::vector<CodeObjectInput>& code_objects
             << " gfxip=" << summary.gfxip << " waves=" << summary.wave_records
             << " instructions=" << summary.instructions << "\n";
         out << "    occupancy start=" << summary.occupancy_starts << " end=" << summary.occupancy_ends
+            << " max_active=" << summary.occupancy_max_active
             << " perf_events=" << summary.perf_events << " shaderdata=" << summary.shaderdata_records
             << " realtime=" << summary.realtime_records << "\n";
         out << "    categories=";
@@ -254,6 +306,21 @@ std::string format_summary_text(const std::vector<CodeObjectInput>& code_objects
             first = false;
         }
         out << "\n";
+        out << "    instruction_cycles duration=" << summary.total_instruction_duration
+            << " stall=" << summary.total_instruction_stall
+            << " stalled_insts=" << summary.instructions_with_stall << "\n";
+        out << "    wave_lifetime total=" << summary.total_wave_lifetime
+            << " max=" << summary.max_wave_lifetime << "\n";
+        if(!summary.wave_state_durations.empty()) {
+            out << "    wave_states=";
+            first = true;
+            for(const auto& item : summary.wave_state_durations) {
+                if(!first) out << ", ";
+                out << item.first << ":" << item.second;
+                first = false;
+            }
+            out << "\n";
+        }
         if(!summary.info_counts.empty()) {
             out << "    info=";
             first = true;
@@ -309,15 +376,48 @@ std::string format_summary_json(const std::vector<CodeObjectInput>& code_objects
         out << "      \"occupancy_records\": " << summary.occupancy_records << ",\n";
         out << "      \"occupancy_starts\": " << summary.occupancy_starts << ",\n";
         out << "      \"occupancy_ends\": " << summary.occupancy_ends << ",\n";
+        out << "      \"occupancy_max_active\": " << summary.occupancy_max_active << ",\n";
+        out << "      \"occupancy_begin_time\": " << summary.occupancy_begin_time << ",\n";
+        out << "      \"occupancy_end_time\": " << summary.occupancy_end_time << ",\n";
+        out << "      \"occupancy_weighted_time\": " << summary.occupancy_weighted_time << ",\n";
         out << "      \"wave_records\": " << summary.wave_records << ",\n";
         out << "      \"timeline_events\": " << summary.timeline_events << ",\n";
         out << "      \"instructions\": " << summary.instructions << ",\n";
+        out << "      \"instructions_with_stall\": " << summary.instructions_with_stall << ",\n";
+        out << "      \"total_instruction_duration\": " << summary.total_instruction_duration << ",\n";
+        out << "      \"total_instruction_stall\": " << summary.total_instruction_stall << ",\n";
+        out << "      \"total_wave_lifetime\": " << summary.total_wave_lifetime << ",\n";
+        out << "      \"max_wave_lifetime\": " << summary.max_wave_lifetime << ",\n";
         out << "      \"perf_events\": " << summary.perf_events << ",\n";
         out << "      \"shaderdata_records\": " << summary.shaderdata_records << ",\n";
         out << "      \"realtime_records\": " << summary.realtime_records << ",\n";
         out << "      \"category_counts\": {";
         bool first = true;
         for(const auto& item : summary.category_counts) {
+            if(!first) out << ", ";
+            out << "\"" << json_escape(item.first) << "\": " << item.second;
+            first = false;
+        }
+        out << "},\n";
+        out << "      \"category_duration_totals\": {";
+        first = true;
+        for(const auto& item : summary.category_duration_totals) {
+            if(!first) out << ", ";
+            out << "\"" << json_escape(item.first) << "\": " << item.second;
+            first = false;
+        }
+        out << "},\n";
+        out << "      \"category_stall_totals\": {";
+        first = true;
+        for(const auto& item : summary.category_stall_totals) {
+            if(!first) out << ", ";
+            out << "\"" << json_escape(item.first) << "\": " << item.second;
+            first = false;
+        }
+        out << "},\n";
+        out << "      \"wave_state_durations\": {";
+        first = true;
+        for(const auto& item : summary.wave_state_durations) {
             if(!first) out << ", ";
             out << "\"" << json_escape(item.first) << "\": " << item.second;
             first = false;

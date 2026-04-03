@@ -15,6 +15,27 @@ dist/
 # native/example build outputs
 native/rocm_sqtt_decoder_helper/build/
 examples/minimal-vulkan-compute-rgp/src/build/
+examples/medium-vulkan-graph-rgp/src/build/
 
 # generated captures
 examples/minimal-vulkan-compute-rgp/captures/*.rgp
+examples/medium-vulkan-graph-rgp/captures/*.rgp
+examples/z-image-turbo-rgp/captures/*.rgp
+examples/z-image-turbo-rgp/captures/last-capture-manifest.txt
+examples/z-image-turbo-rgp/captures/profile-knob-probes/
+examples/z-image-turbo-rgp/models/
+examples/z-image-turbo-rgp/output/
+examples/z-image-turbo-rgp/perf-logs/
+examples/z-image-turbo-rgp/phase-markers/
+examples/z-image-turbo-rgp/app/direct-txt2img
+examples/z-image-turbo-rgp/app/embd_res/
+examples/z-image-turbo-rgp/app/lib/
+examples/z-image-turbo-rgp/app/*.o
+examples/z-image-turbo-rgp/app/vulkan-shaders-gen-noext
+examples/z-image-turbo-rgp/app/ggml/src/ggml-vulkan-shaders.cpp
+examples/z-image-turbo-rgp/app/ggml/src/ggml-vulkan-shaders-noext.cpp
+examples/z-image-turbo-rgp/app/vulkan-spv-tmp/
+examples/z-image-turbo-rgp/app/vulkan-spv-noext-tmp/
+examples/z-image-turbo-rgp/app/tools/mtmd/test-1.jpeg
+examples/z-image-turbo-rgp/app/tools/mtmd/test-2.mp3
+examples/z-image-turbo-rgp/src/__pycache__/

@@ -116,3 +116,33 @@ def pair_command_buffer_spans(command_buffer_markers: list[dict[str, Any]]) -> d
         "command_buffer_spans": spans,
         "unmatched_command_buffer_begins": unmatched,
     }
+
+
+def pair_barrier_spans(barrier_markers: list[dict[str, Any]]) -> dict[str, Any]:
+    starts_by_cb: dict[int | None, list[dict[str, Any]]] = {}
+    spans: list[dict[str, Any]] = []
+    for marker in sorted(barrier_markers, key=_marker_position):
+        kind = marker.get("kind")
+        cb_id = marker.get("cb_id") if isinstance(marker.get("cb_id"), int) else None
+        if kind == "BARRIER_START":
+            starts_by_cb.setdefault(cb_id, []).append(marker)
+        elif kind == "BARRIER_END":
+            start_list = starts_by_cb.get(cb_id)
+            start_marker = start_list.pop() if start_list else None
+            spans.append(
+                {
+                    "cb_id": cb_id,
+                    "matched": start_marker is not None,
+                    "begin_marker": start_marker,
+                    "end_marker": marker,
+                }
+            )
+    unmatched = [
+        {"cb_id": cb_id, "marker": marker}
+        for cb_id, markers in starts_by_cb.items()
+        for marker in markers
+    ]
+    return {
+        "barrier_spans": spans,
+        "unmatched_barrier_begins": unmatched,
+    }

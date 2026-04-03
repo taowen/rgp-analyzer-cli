@@ -1,0 +1,51 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer BufferA {
+    uint data_a[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint element_count;
+    uint iteration;
+    uint phase;
+    uint scale;
+} pc;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= pc.element_count) {
+        return;
+    }
+
+    uint v0 = data_a[index] + index + (pc.iteration + 1u) * 17u;
+    uint v1 = v0 ^ 0x9e3779b9u;
+    uint v2 = v1 + 0x7f4a7c15u;
+    uint v3 = (v2 << 3) | (v2 >> 29);
+    uint v4 = v3 ^ (v1 >> 5);
+    uint v5 = v4 + v0 * 33u;
+    uint v6 = (v5 << 7) | (v5 >> 25);
+    uint v7 = v6 ^ (v2 << 11);
+    uint v8 = v7 + v3 * 17u;
+    uint v9 = v8 ^ (v4 >> 13);
+    uint v10 = v9 + v5 * 9u;
+    uint v11 = v10 ^ (v6 << 15);
+
+    for (uint i = 0; i < pc.scale; ++i) {
+        v0 = (v0 * 1664525u + 1013904223u) ^ (v8 >> 3);
+        v1 ^= v0 + i;
+        v2 += (v1 << 1) ^ (v9 >> 7);
+        v3 = ((v3 << 5) | (v3 >> 27)) ^ v10;
+        v4 += v2 ^ v11;
+        v5 ^= (v4 << 9) + v0;
+        v6 += (v5 >> 11) ^ v1;
+        v7 ^= (v6 << 13) + v2;
+        v8 += (v7 >> 3) ^ v3;
+        v9 ^= (v8 << 7) + v4;
+        v10 += (v9 >> 5) ^ v5;
+        v11 ^= (v10 << 15) + v6;
+    }
+
+    data_a[index] = v0 ^ v1 ^ v2 ^ v3 ^ v4 ^ v5 ^ v6 ^ v7 ^ v8 ^ v9 ^ v10 ^ v11;
+}

@@ -1,0 +1,27 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer BufferA {
+    uint data_a[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint element_count;
+    uint iteration;
+    uint phase;
+    uint scale;
+} pc;
+
+void main() {
+    uint index = gl_GlobalInvocationID.x;
+    if (index >= pc.element_count) {
+        return;
+    }
+
+    uint v = data_a[index] + index + (pc.iteration + 1u) * 17u;
+    for (uint i = 0; i < pc.scale; ++i) {
+        v = (v * 1664525u + 1013904223u) ^ (v >> 11);
+    }
+    data_a[index] = v;
+}

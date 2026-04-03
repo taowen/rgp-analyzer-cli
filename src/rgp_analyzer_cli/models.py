@@ -45,3 +45,29 @@ class TriageOptions:
     limit: int = 10
     hotspot_limit: int = 8
     use_cache: bool = True
+
+
+@dataclass(frozen=True)
+class CompareOptions:
+    build_helper: bool = False
+    helper: Path | None = None
+    decoder_lib_dir: Path | None = None
+    isa_tool: str | None = None
+    readelf_tool: str | None = None
+    limit: int = 10
+    hotspot_limit: int = 8
+    code_object_index: int | None = None
+    use_cache: bool = True
+
+
+@dataclass(frozen=True)
+class ShaderFocusOptions:
+    build_helper: bool = False
+    helper: Path | None = None
+    decoder_lib_dir: Path | None = None
+    isa_tool: str | None = None
+    readelf_tool: str | None = None
+    limit: int = 10
+    hotspot_limit: int = 8
+    code_object_index: int | None = None
+    use_cache: bool = True

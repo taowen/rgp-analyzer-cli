@@ -5,6 +5,7 @@ from typing import Any
 
 from .decode_bridge import build_stitch_model, find_code_object_record
 from .dispatch_isa_evidence import build_dispatch_isa_overview, build_stream_dispatch_isa_summary
+from .profiling_analysis import build_runtime_hotspot_profiles, build_runtime_profile
 from .resource_metadata import extract_resource_metadata
 
 
@@ -61,9 +62,11 @@ def _bridge_metadata(report: dict[str, Any]) -> tuple[dict[int, dict[str, Any]],
     return metadata_by_index, model["entries"], model["streams"]
 
 
-def _decode_diagnostics(decode_json: dict[str, Any]) -> dict[str, Any]:
+def _decode_diagnostics(report: dict[str, Any], decode_json: dict[str, Any]) -> dict[str, Any]:
     streams = decode_json.get("streams") or []
     shaderdata_records = sum(int(stream.get("shaderdata_records", 0)) for stream in streams)
+    total_instructions = sum(int(stream.get("instructions", 0) or 0) for stream in streams)
+    total_waves = sum(int(stream.get("waves", 0) or 0) for stream in streams if stream.get("waves") is not None)
     info_counts: dict[str, int] = {}
     zero_code_object_hotspots = 0
     total_hotspots = 0
@@ -76,15 +79,29 @@ def _decode_diagnostics(decode_json: dict[str, Any]) -> dict[str, Any]:
                 zero_code_object_hotspots += 1
 
     code_object_load_failures = int(decode_json.get("code_object_load_failures", 0) or 0)
+    queue_event_count = sum(len(chunk.get("events") or []) for chunk in (report.get("queue_event_chunks") or []))
+    total_sqtt_trace_bytes = sum(int(item.get("size", 0) or 0) for item in (report.get("sqtt_data_chunks") or []))
     likely_missing_codeobj_instrumentation = (
         code_object_load_failures > 0 and shaderdata_records == 0 and zero_code_object_hotspots == total_hotspots and total_hotspots > 0
     )
+    sparse_runtime_trace = (
+        total_sqtt_trace_bytes > 0
+        and queue_event_count == 0
+        and total_instructions == 0
+        and total_hotspots == 0
+        and shaderdata_records == 0
+    )
     return {
         "shaderdata_records": shaderdata_records,
+        "total_instructions": total_instructions,
+        "total_waves": total_waves,
         "info_counts": info_counts,
         "zero_code_object_hotspots": zero_code_object_hotspots,
         "total_hotspots": total_hotspots,
+        "queue_event_count": queue_event_count,
+        "total_sqtt_trace_bytes": total_sqtt_trace_bytes,
         "likely_missing_codeobj_instrumentation": likely_missing_codeobj_instrumentation,
+        "sparse_runtime_trace": sparse_runtime_trace,
     }
 
 
@@ -94,7 +111,7 @@ def stitch_hotspots(report: dict[str, Any], decode_json: dict[str, Any] | None) 
 
     metadata_by_index, bridge_entries, stream_models = _bridge_metadata(report)
     stitched = dict(decode_json)
-    stitched["decode_diagnostics"] = _decode_diagnostics(decode_json)
+    stitched["decode_diagnostics"] = _decode_diagnostics(report, decode_json)
     stitched_streams: list[dict[str, Any]] = []
     stream_model_by_index = {int(stream["stream_index"]): stream for stream in stream_models}
     dispatch_isa_by_stream = {
@@ -127,6 +144,7 @@ def stitch_hotspots(report: dict[str, Any], decode_json: dict[str, Any] | None) 
             "dispatch_isa_mapped_dispatch_count": int((dispatch_isa or {}).get("mapped_dispatch_count", 0) or 0),
             "dispatch_isa_dispatch_count": int((dispatch_isa or {}).get("dispatch_count", 0) or 0),
         }
+        stitched_stream["runtime_profile"] = build_runtime_profile(stream)
         if dispatch_isa is not None:
             stitched_stream["dispatch_isa_evidence"] = dispatch_isa
         annotated_hotspots = []
@@ -281,6 +299,7 @@ def stitch_hotspots(report: dict[str, Any], decode_json: dict[str, Any] | None) 
             annotated_hotspots.append(annotated)
 
         stitched_stream["annotated_hotspots"] = annotated_hotspots
+        stitched_stream["runtime_hotspot_profiles"] = build_runtime_hotspot_profiles(annotated_hotspots)
         stitched_streams.append(stitched_stream)
 
     stitched["streams"] = stitched_streams
@@ -294,8 +313,11 @@ def render_stitched_hotspots(stitched_decode: dict[str, Any]) -> str:
         lines.append(
             "  diagnostics:"
             + f" shaderdata_records={diagnostics.get('shaderdata_records')}"
+            + f" queue_events={diagnostics.get('queue_event_count')}"
+            + f" instructions={diagnostics.get('total_instructions')}"
             + f" zero_code_object_hotspots={diagnostics.get('zero_code_object_hotspots')}/{diagnostics.get('total_hotspots')}"
             + f" likely_missing_codeobj_instrumentation={diagnostics.get('likely_missing_codeobj_instrumentation')}"
+            + f" sparse_runtime_trace={diagnostics.get('sparse_runtime_trace')}"
         )
         if diagnostics.get("info_counts"):
             lines.append(f"    info_counts={diagnostics.get('info_counts')}")
@@ -323,6 +345,7 @@ def render_stitched_hotspots(stitched_decode: dict[str, Any]) -> str:
             )
     for stream in stitched_decode.get("streams", []):
         context = stream.get("stream_context") or {}
+        runtime_profile = stream.get("runtime_profile") or {}
         lines.append(
             f"  stream[{stream['index']}] waves={stream.get('wave_records', 0)} instructions={stream.get('instructions', 0)} "
             f"resolved_code_object={context.get('resolved_code_object_index')} stream_match={context.get('stream_match_kind')} "
@@ -330,6 +353,37 @@ def render_stitched_hotspots(stitched_decode: dict[str, Any]) -> str:
             f"dispatch_code_objects={context.get('distinct_assigned_code_objects', [])} "
             f"dispatch_isa={context.get('dispatch_isa_mapped_dispatch_count', 0)}/{context.get('dispatch_isa_dispatch_count', 0)}"
         )
+        if runtime_profile:
+            avg_stall = runtime_profile.get("avg_stall_per_inst")
+            stall_share = runtime_profile.get("stall_share_of_duration")
+            occupancy_avg = runtime_profile.get("occupancy_average_active")
+            parts = ["    runtime_profile="]
+            if isinstance(avg_stall, (int, float)):
+                parts.append(f"avg_stall_per_inst={avg_stall:.2f}")
+            if isinstance(stall_share, (int, float)):
+                parts.append(f"stall_share={stall_share:.2f}")
+            if isinstance(occupancy_avg, (int, float)):
+                parts.append(f"occupancy_avg={occupancy_avg:.2f}")
+            parts.append(f"occupancy_max={int(runtime_profile.get('occupancy_max_active', 0) or 0)}")
+            lines.append(" ".join(parts))
+            top_categories = runtime_profile.get("category_profiles") or []
+            if top_categories:
+                top_category = top_categories[0]
+                lines.append(
+                    "    category_profile="
+                    f"{top_category.get('category')} count={int(top_category.get('count', 0) or 0)} "
+                    f"stall_total={int(top_category.get('stall_total', 0) or 0)} "
+                    f"duration_total={int(top_category.get('duration_total', 0) or 0)}"
+                )
+            top_states = runtime_profile.get("wave_state_profiles") or []
+            if top_states:
+                state = top_states[0]
+                share = state.get("share")
+                share_text = f" share={share:.2f}" if isinstance(share, (int, float)) else ""
+                lines.append(
+                    "    wave_state="
+                    f"{state.get('state')} duration={int(state.get('duration', 0) or 0)}{share_text}"
+                )
         for index, hotspot in enumerate(stream.get("annotated_hotspots", [])):
             summary = hotspot.get("stitch_summary") or {}
             summary_text = ""
@@ -401,4 +455,25 @@ def render_stitched_hotspots(stitched_decode: dict[str, Any]) -> str:
                             f"count={int(top_pc.get('count', 0))} "
                             f"{top_pc.get('mnemonic')} {top_pc.get('operands')}".rstrip()
                         )
+        hotspot_profiles = stream.get("runtime_hotspot_profiles") or []
+        if hotspot_profiles:
+            top = hotspot_profiles[0]
+            symbol = top.get("symbol") or {}
+            symbol_text = ""
+            if symbol.get("name"):
+                symbol_text = f" symbol={symbol.get('name')}+0x{int(symbol.get('offset', 0) or 0):x}"
+            avg_stall = top.get("avg_stall_per_hit")
+            avg_duration = top.get("avg_duration_per_hit")
+            stall_share = top.get("stall_share_of_duration")
+            lines.append(
+                "    hotspot_profile="
+                f"address=0x{int(top.get('address', 0) or 0):x}"
+                f" duration={int(top.get('total_duration', 0) or 0)}"
+                f" stall={int(top.get('total_stall', 0) or 0)}"
+                f" hitcount={int(top.get('hitcount', 0) or 0)}"
+                + (f" avg_duration={avg_duration:.2f}" if isinstance(avg_duration, (int, float)) else "")
+                + (f" avg_stall={avg_stall:.2f}" if isinstance(avg_stall, (int, float)) else "")
+                + (f" stall_share={stall_share:.2f}" if isinstance(stall_share, (int, float)) else "")
+                + symbol_text
+            )
     return "\n".join(lines)

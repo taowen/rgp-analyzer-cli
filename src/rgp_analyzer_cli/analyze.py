@@ -239,63 +239,49 @@ def generate_advice(report: dict[str, Any]) -> list[str]:
     sqtt = sqtt_summary(report)
 
     if not report["header"]["valid_magic"]:
-        advice.append("The file magic is invalid. Verify this is a real .rgp capture before deeper analysis.")
+        advice.append("The file magic is invalid; this file does not look like a valid .rgp capture.")
         return advice
 
     if not events:
-        advice.append("No queue events were decoded. Re-capture with queue timing enabled or validate the capture mode.")
+        advice.append("No queue events were decoded.")
     else:
         slowest = max(events, key=lambda item: item["gpu_duration"])
         advice.append(
-            "Start with the slowest submit: "
+            "Slowest submit: "
             f"{slowest['event_name']} on {slowest['queue_type_name']}/{slowest['engine_type_name']} "
             f"with gpu_duration={slowest['gpu_duration']}."
         )
 
         compute_events = [event for event in events if event["queue_type_name"] == "COMPUTE"]
         if compute_events:
-            advice.append(
-                f"The capture includes {len(compute_events)} compute-queue events. This is suitable for compute-shader triage."
-            )
+            advice.append(f"The capture includes {len(compute_events)} compute-queue events.")
         else:
-            advice.append(
-                "No compute queue events were identified. This capture may be graphics-dominated or queue typing was not preserved."
-            )
+            advice.append("No compute queue events were identified.")
 
     if "SQTT_DATA" not in counts:
-        advice.append("No SQTT_DATA chunks were found. The capture will be weak for deep timeline inspection in GUI RGP.")
+        advice.append("No SQTT_DATA chunks were found.")
     else:
-        advice.append(
-            f"The capture contains {sqtt['data_chunk_count']} SQTT streams with {sqtt['total_trace_bytes']} bytes of trace payload."
-        )
+        advice.append(f"The capture contains {sqtt['data_chunk_count']} SQTT streams with {sqtt['total_trace_bytes']} bytes of trace payload.")
 
     if "SPM_DB" not in counts:
-        advice.append("No SPM_DB chunk was found. Hardware counter analysis may be unavailable in this capture.")
+        advice.append("No SPM_DB chunk was found.")
 
     if code_objects["record_count"] == 0:
-        advice.append("No code object records were parsed. Correlating submits back to shader payloads will be limited.")
+        advice.append("No code object records were parsed.")
     else:
-        advice.append(
-            f"Parsed {code_objects['record_count']} code object records, including {code_objects['elf_record_count']} ELF payloads."
-        )
+        advice.append(f"Parsed {code_objects['record_count']} code object records, including {code_objects['elf_record_count']} ELF payloads.")
 
     if pso["record_count"] == 0:
-        advice.append("No PSO correlation records were decoded. Pipeline naming may be missing from this capture.")
+        advice.append("No PSO correlation records were decoded.")
     else:
-        advice.append(f"Decoded {pso['record_count']} PSO correlation records. Use them to map trace data back to API objects.")
+        advice.append(f"Decoded {pso['record_count']} PSO correlation records.")
 
     corr = correlation_summary(report)
     if corr["pso_record_count"] and corr["matched_pso_count"]:
-        advice.append(
-            f"Matched {corr['matched_pso_count']} PSO records to loader-event hashes. This capture is suitable for pipeline/hash correlation."
-        )
+        advice.append(f"Matched {corr['matched_pso_count']} PSO records to loader-event hashes.")
     elif corr["pso_record_count"]:
-        advice.append("PSO records exist, but none matched loader-event hashes. Correlation may be incomplete.")
+        advice.append("PSO records exist, but none matched loader-event hashes.")
 
     if len(events) == 1:
-        advice.append("Only one queue event was recorded. For A/B optimization loops, per-submit captures are usually easier to compare.")
-
-    advice.append(
-        "Use this CLI for triage; use RGP or RGA for VGPR/SGPR/LDS/scratch-level interpretation once the hot submit is known."
-    )
+        advice.append("Only one queue event was recorded.")
     return advice

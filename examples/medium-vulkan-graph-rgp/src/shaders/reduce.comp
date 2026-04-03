@@ -1,0 +1,45 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer BufferA {
+    uint data_a[];
+};
+
+layout(set = 0, binding = 1) readonly buffer BufferB {
+    uint data_b[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint element_count;
+    uint iteration;
+    uint phase;
+    uint scale;
+} pc;
+
+shared uint scratch[64];
+
+void main() {
+    uint local_index = gl_LocalInvocationIndex;
+    uint group_base = gl_WorkGroupID.x * 64u;
+    uint index = group_base + local_index;
+
+    uint value = 0u;
+    if (index < pc.element_count) {
+        value = data_b[index] ^ (pc.iteration + 1u);
+    }
+
+    scratch[local_index] = value;
+    barrier();
+
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (local_index < stride) {
+            scratch[local_index] += scratch[local_index + stride];
+        }
+        barrier();
+    }
+
+    if (local_index == 0u && group_base < pc.element_count) {
+        data_a[group_base] ^= scratch[0];
+    }
+}

@@ -5,21 +5,27 @@ import json
 from pathlib import Path
 
 from .compare import compare_v1_v2
-from .models import DecodeOptions, DispatchIsaOptions, TriageOptions
+from .models import CompareOptions, DecodeOptions, DispatchIsaOptions, TriageOptions
 from .render import (
+    render_compare_capture_payload,
+    render_compare_shader_focus_payload,
     render_decode_payload,
     render_dispatch_payload,
     render_inspect,
     render_resource_payload,
+    render_shader_focus_payload,
     render_stitch_report,
     render_triage_payload,
 )
 from .services import (
+    compare_capture_payload,
+    compare_shader_focus_payload,
     decode_payload,
     dispatch_isa_payload,
     inspect_payload,
     load_capture,
     resource_payload,
+    shader_focus_payload,
     stitch_payload,
     triage_payload,
 )
@@ -87,6 +93,45 @@ def _build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("rgp_file", type=Path)
     compare_parser.add_argument("--json", action="store_true", dest="as_json")
 
+    compare_capture_parser = subparsers.add_parser("compare-captures")
+    compare_capture_parser.add_argument("baseline_rgp", type=Path)
+    compare_capture_parser.add_argument("candidate_rgp", type=Path)
+    compare_capture_parser.add_argument("--json", action="store_true", dest="as_json")
+    compare_capture_parser.add_argument("--build-helper", action="store_true")
+    compare_capture_parser.add_argument("--helper", type=Path, default=None)
+    compare_capture_parser.add_argument("--decoder-lib-dir", type=Path, default=None)
+    compare_capture_parser.add_argument("--isa-tool", default=None)
+    compare_capture_parser.add_argument("--readelf-tool", default=None)
+    compare_capture_parser.add_argument("--limit", type=int, default=10)
+    compare_capture_parser.add_argument("--hotspot-limit", type=int, default=8)
+    compare_capture_parser.add_argument("--no-cache", action="store_true")
+
+    shader_focus_parser = subparsers.add_parser("shader-focus")
+    add_capture(shader_focus_parser)
+    shader_focus_parser.add_argument("--build-helper", action="store_true")
+    shader_focus_parser.add_argument("--helper", type=Path, default=None)
+    shader_focus_parser.add_argument("--decoder-lib-dir", type=Path, default=None)
+    shader_focus_parser.add_argument("--isa-tool", default=None)
+    shader_focus_parser.add_argument("--readelf-tool", default=None)
+    shader_focus_parser.add_argument("--limit", type=int, default=10)
+    shader_focus_parser.add_argument("--hotspot-limit", type=int, default=8)
+    shader_focus_parser.add_argument("--code-object-index", type=int, default=None)
+    shader_focus_parser.add_argument("--no-cache", action="store_true")
+
+    compare_shader_focus_parser = subparsers.add_parser("compare-shader-focus")
+    compare_shader_focus_parser.add_argument("baseline_rgp", type=Path)
+    compare_shader_focus_parser.add_argument("candidate_rgp", type=Path)
+    compare_shader_focus_parser.add_argument("--json", action="store_true", dest="as_json")
+    compare_shader_focus_parser.add_argument("--build-helper", action="store_true")
+    compare_shader_focus_parser.add_argument("--helper", type=Path, default=None)
+    compare_shader_focus_parser.add_argument("--decoder-lib-dir", type=Path, default=None)
+    compare_shader_focus_parser.add_argument("--isa-tool", default=None)
+    compare_shader_focus_parser.add_argument("--readelf-tool", default=None)
+    compare_shader_focus_parser.add_argument("--limit", type=int, default=10)
+    compare_shader_focus_parser.add_argument("--hotspot-limit", type=int, default=8)
+    compare_shader_focus_parser.add_argument("--code-object-index", type=int, default=None)
+    compare_shader_focus_parser.add_argument("--no-cache", action="store_true")
+
     return parser
 
 
@@ -103,6 +148,51 @@ def main() -> int:
         print(f"  all_match: {payload['all_match']}")
         for name, ok in payload["checks"].items():
             print(f"  {name}: {ok}")
+        return 0
+
+    if args.command == "compare-captures":
+        baseline = load_capture(args.baseline_rgp)
+        candidate = load_capture(args.candidate_rgp)
+        payload = compare_capture_payload(
+            baseline,
+            candidate,
+            CompareOptions(
+                build_helper=args.build_helper,
+                helper=args.helper,
+                decoder_lib_dir=args.decoder_lib_dir,
+                isa_tool=args.isa_tool,
+                readelf_tool=args.readelf_tool,
+                limit=args.limit,
+                hotspot_limit=args.hotspot_limit,
+                use_cache=not args.no_cache,
+            ),
+        )
+        if args.as_json:
+            return _json_output(payload)
+        print(render_compare_capture_payload(payload))
+        return 0
+
+    if args.command == "compare-shader-focus":
+        baseline = load_capture(args.baseline_rgp)
+        candidate = load_capture(args.candidate_rgp)
+        payload = compare_shader_focus_payload(
+            baseline,
+            candidate,
+            CompareOptions(
+                build_helper=args.build_helper,
+                helper=args.helper,
+                decoder_lib_dir=args.decoder_lib_dir,
+                isa_tool=args.isa_tool,
+                readelf_tool=args.readelf_tool,
+                limit=args.limit,
+                hotspot_limit=args.hotspot_limit,
+                code_object_index=args.code_object_index,
+                use_cache=not args.no_cache,
+            ),
+        )
+        if args.as_json:
+            return _json_output(payload)
+        print(render_compare_shader_focus_payload(payload))
         return 0
 
     session = load_capture(args.rgp_file)
@@ -181,6 +271,28 @@ def main() -> int:
         if args.as_json:
             return _json_output(payload)
         print(render_triage_payload(payload))
+        return 0
+
+    if args.command == "shader-focus":
+        from .models import ShaderFocusOptions
+
+        payload = shader_focus_payload(
+            session,
+            ShaderFocusOptions(
+                build_helper=args.build_helper,
+                helper=args.helper,
+                decoder_lib_dir=args.decoder_lib_dir,
+                isa_tool=args.isa_tool,
+                readelf_tool=args.readelf_tool,
+                limit=args.limit,
+                hotspot_limit=args.hotspot_limit,
+                code_object_index=args.code_object_index,
+                use_cache=not args.no_cache,
+            ),
+        )
+        if args.as_json:
+            return _json_output(payload)
+        print(render_shader_focus_payload(payload))
         return 0
 
     parser.error(f"unsupported command: {args.command}")

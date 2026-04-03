@@ -1,0 +1,48 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer DataBuffer {
+    uint data[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint element_count;
+    uint seed;
+    uint iterations;
+} pc;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.element_count) {
+        return;
+    }
+
+    uvec4 sum = uvec4(data[idx] + pc.seed + idx);
+    for (uint iter = 0u; iter < pc.iterations; ++iter) {
+        uvec4 a0 = sum + uvec4(iter);
+        uvec4 a1 = a0 ^ uvec4(0x9e3779b9u);
+        uvec4 a2 = a1 + (a0 << 1);
+        uvec4 a3 = a2 ^ (a1 >> 3);
+        uvec4 a4 = a3 + (a2 << 2);
+        uvec4 a5 = a4 ^ (a3 >> 5);
+        uvec4 a6 = a5 + (a4 << 1);
+        uvec4 a7 = a6 ^ (a5 >> 7);
+        uvec4 a8 = a7 + (a6 << 3);
+        uvec4 a9 = a8 ^ (a7 >> 11);
+        uvec4 a10 = a9 + (a8 << 1);
+        uvec4 a11 = a10 ^ (a9 >> 13);
+        uvec4 a12 = a11 + (a10 << 2);
+        uvec4 a13 = a12 ^ (a11 >> 17);
+        uvec4 a14 = a13 + (a12 << 1);
+        uvec4 a15 = a14 ^ (a13 >> 19);
+
+        sum =
+            a0 + a1 + a2 + a3 +
+            a4 + a5 + a6 + a7 +
+            a8 + a9 + a10 + a11 +
+            a12 + a13 + a14 + a15;
+    }
+
+    data[idx] = sum.x ^ sum.y ^ sum.z ^ sum.w;
+}

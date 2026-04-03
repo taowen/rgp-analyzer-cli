@@ -1,0 +1,38 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer DataBuffer {
+    uint data[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint element_count;
+    uint seed;
+    uint iterations;
+} pc;
+
+shared uint tile[64];
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    uint lid = gl_LocalInvocationID.x;
+    if (idx >= pc.element_count) {
+        return;
+    }
+
+    uint value = data[idx] ^ (pc.seed + lid * 17u);
+    for (uint iter = 0u; iter < pc.iterations; ++iter) {
+        tile[lid] = value + iter * 13u;
+        memoryBarrierShared();
+        barrier();
+
+        uint neighbor = tile[(lid + 1u) & 63u];
+        value = (value << 5u) ^ (neighbor + 0x9e3779b9u + iter);
+
+        memoryBarrierShared();
+        barrier();
+    }
+
+    data[idx] = value;
+}

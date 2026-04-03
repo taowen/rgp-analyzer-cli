@@ -1,0 +1,20 @@
+.cache/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# local builds
+build/
+dist/
+*.o
+*.a
+*.so
+
+# native/example build outputs
+native/rocm_sqtt_decoder_helper/build/
+examples/minimal-vulkan-compute-rgp/src/build/
+
+# generated captures
+examples/minimal-vulkan-compute-rgp/captures/*.rgp

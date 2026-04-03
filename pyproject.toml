@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rgp-analyzer-cli"
+version = "0.1.0"
+description = "CLI to inspect and analyze Radeon GPU Profiler .rgp files"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+  { name = "taowen" }
+]
+keywords = ["vulkan", "amd", "rgp", "gpu", "profiler", "cli"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Environment :: Console",
+  "Topic :: Software Development :: Debuggers",
+]
+
+[project.scripts]
+rgp-analyzer = "rgp_analyzer_cli.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

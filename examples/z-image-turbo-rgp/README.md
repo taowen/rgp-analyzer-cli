@@ -16,6 +16,12 @@ Current role in the repo:
 - proof that `rgp-analyzer-cli` can guide tuning on a non-toy Vulkan compute stack
 - home of the `ggml perf -> diffusion-only rgp_profile -> compare` workflow
 
+Current release scope for this example:
+
+- real diffusion-phase capture on Linux + RADV
+- focused shader compare against checked-in `.rgp` baselines
+- report-oriented metric output via `metrics-doc`
+
 ## Files
 
 ```text
@@ -126,12 +132,28 @@ To compare one focused shader before and after a backend or shader change:
 
 ```bash
 PYTHONPATH=../../src python3 -m rgp_analyzer_cli shader-focus \
-  ./captures/baseline-current.rgp
+  ./captures/baseline-current.rgp \
+  --code-object-index 1 \
+  --source-file ./app/ggml/src/ggml-vulkan/vulkan-shaders/flash_attn.comp
 
 PYTHONPATH=../../src python3 -m rgp_analyzer_cli compare-shader-focus \
   ./captures/baseline-current.rgp \
-  ./captures/baseline-splitk-heuristic.rgp
+  ./captures/baseline-splitk-heuristic.rgp \
+  --code-object-index 1 \
+  --source-file ./app/ggml/src/ggml-vulkan/vulkan-shaders/flash_attn.comp
+
+PYTHONPATH=../../src python3 -m rgp_analyzer_cli compare-shader-focus \
+  ./captures/baseline-current.rgp \
+  ./captures/baseline-splitk-heuristic.rgp \
+  --code-object-index 1 \
+  --source-file ./app/ggml/src/ggml-vulkan/vulkan-shaders/flash_attn.comp \
+  --source-excerpt
+
+PYTHONPATH=../../src python3 -m rgp_analyzer_cli metrics-doc --format report
 ```
+
+The last command emits a report-ready metrics chapter. The checked-in reference lives at
+[docs/metrics.md](/home/taowen/projects/rgp-analyzer-cli/docs/metrics.md).
 
 The current workload uses the vendored `direct-txt2img` source tree at 1024x1024 with 8 steps.
 Generation size can be adjusted with:

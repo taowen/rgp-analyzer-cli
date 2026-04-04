@@ -4,6 +4,21 @@ CLI for Linux/RADV `.rgp` captures, aimed at Vulkan compute shader tuning withou
 It reports capture structure, runtime signals, stitch confidence, and shader-resource facts. It does not try to prescribe optimizations.
 The old v1 code is archived under [`bak/rgp_analyzer_cli_v1`](/home/taowen/projects/rgp-analyzer-cli/bak/rgp_analyzer_cli_v1). The canonical package is `rgp_analyzer_cli`.
 
+## Current Release Scope
+
+This repo is now centered on:
+
+- real-workload Linux/RADV profiling
+- focused shader analysis for Vulkan compute captures
+- A/B compare for shader or backend changes
+- report-ready metric documentation
+
+Current public-path limits are explicit in tool output and in [docs/metrics.md](/home/taowen/projects/rgp-analyzer-cli/docs/metrics.md):
+
+- no active-lane / `exec_mask` data
+- no fine-grained not-issued-reason taxonomy
+- no stride / cacheline-efficiency metrics
+
 ## What I need from this tool
 
 When iterating on a Vulkan compute shader, I want to answer these questions quickly:
@@ -79,13 +94,22 @@ Heavy commands (`decode-sqtt`, `dispatch-isa-map`, `shader-triage`) now cache JS
 
 - `shader-focus`
   Shader-tuning view for the hottest code object in a capture. It compresses the current capture to:
-  `VGPR / SGPR / LDS / scratch`, runtime stall and occupancy, top hotspot cost, top dispatch-ISA PCs, and runtime proxies such as
-  `global_mem`, `lds`, `sync_wait`, and `IMMED`-heavy behavior.
+  `VGPR / SGPR / LDS / scratch`, runtime stall and occupancy, top hotspot cost, top dispatch-ISA PCs, and runtime metrics such as
+  `global_memory_duration_share`, `lds_stall_per_inst`, `sync_wait_share`, and `immed_stall_per_inst`.
+  It also supports `--source-file`, plus `instruction_ranking` and `memory_access_hints` sections to make shader work more source-facing.
+  Use `--source-excerpt` only when you want expanded code snippets; default output stays short.
   The runtime summary is still capture-global; the most shader-specific evidence is the focused hotspot bucket plus `top_pcs`.
 
 - `compare-shader-focus`
-  A/B compare for shader work. It keeps the compare centered on the focused code object and highlights whether the candidate:
-  changes occupancy, sync-wait pressure, LDS-heavy behavior, average stall, or hotspot cost per hit.
+  A/B compare for shader work. It keeps the compare centered on the focused code object and quantifies:
+  occupancy, `sync_wait_cycles`, `immed_stall_per_inst`, `lds_stall_per_inst`, average stall, and hotspot cost per hit.
+  It also emits `instruction_ranking_delta`, so the hottest ISA buckets can be compared directly between two captures.
+  Use `--source-excerpt` to expand source snippets only when needed.
+
+- `metrics-doc`
+  Emits the current metric reference as either a report-friendly plain-text chapter or Markdown.
+  Use this when you want a stable explanation section for a tuning report.
+  The same content is also checked into [docs/metrics.md](/home/taowen/projects/rgp-analyzer-cli/docs/metrics.md).
 
 - `dispatch-isa-map`
   Uses the `.rgp` stitch model plus vendored raw SQTT decode to recover dispatch-segment ISA evidence without relying on an external `tinygrad` checkout.
@@ -160,3 +184,10 @@ If I am tuning a compute shader, the shortest useful loop is:
 6. use `shader-focus` or `compare-shader-focus` when changing a shader or backend heuristic
 7. if still ambiguous, inspect dispatch-level ISA evidence with `dispatch-isa-map`
 8. if that is still not enough, open RGP or hand the ELF to RGA
+
+For a report appendix or metrics chapter:
+
+```bash
+PYTHONPATH=src python3 -m rgp_analyzer_cli metrics-doc --format report
+PYTHONPATH=src python3 -m rgp_analyzer_cli metrics-doc --format markdown
+```

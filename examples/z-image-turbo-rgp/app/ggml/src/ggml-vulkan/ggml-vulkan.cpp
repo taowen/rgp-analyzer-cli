@@ -2900,7 +2900,9 @@ static vk_fa_tuning_params get_fa_tuning_params_scalar(const vk_device& device, 
     // Row split splits the workgroup so that synchronization only has to happen within subgroups, which avoids barriers
     uint32_t row_split_max_hsk = 64;
     if (device->vendor_id == VK_VENDOR_ID_AMD && device->architecture != AMD_GCN && !device->uma) {
-        row_split_max_hsk = n_rows <= 8 ? 64 : 128;
+        // On RDNA, flash attention often shows IMMED/WAIT-heavy traces when row_split stays at 1.
+        // Bias toward row_split=4 earlier so the final reductions stay within subgroups and use fewer barriers.
+        row_split_max_hsk = n_rows <= 8 ? 32 : 64;
     }
     result.row_split = (n_rows < 4 || hsk <= row_split_max_hsk) ? 1 : 4;
 

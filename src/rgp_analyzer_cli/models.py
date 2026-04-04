@@ -57,6 +57,7 @@ class CompareOptions:
     limit: int = 10
     hotspot_limit: int = 8
     code_object_index: int | None = None
+    source_file: Path | None = None
     use_cache: bool = True
 
 
@@ -70,4 +71,5 @@ class ShaderFocusOptions:
     limit: int = 10
     hotspot_limit: int = 8
     code_object_index: int | None = None
+    source_file: Path | None = None
     use_cache: bool = True

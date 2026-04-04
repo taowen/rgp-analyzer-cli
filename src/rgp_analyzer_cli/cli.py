@@ -5,6 +5,11 @@ import json
 from pathlib import Path
 
 from .compare import compare_v1_v2
+from .metrics_reference import (
+    metrics_reference_payload,
+    render_metrics_reference_markdown,
+    render_metrics_reference_report_section,
+)
 from .models import CompareOptions, DecodeOptions, DispatchIsaOptions, TriageOptions
 from .render import (
     render_compare_capture_payload,
@@ -116,6 +121,8 @@ def _build_parser() -> argparse.ArgumentParser:
     shader_focus_parser.add_argument("--limit", type=int, default=10)
     shader_focus_parser.add_argument("--hotspot-limit", type=int, default=8)
     shader_focus_parser.add_argument("--code-object-index", type=int, default=None)
+    shader_focus_parser.add_argument("--source-file", type=Path, default=None)
+    shader_focus_parser.add_argument("--source-excerpt", action="store_true")
     shader_focus_parser.add_argument("--no-cache", action="store_true")
 
     compare_shader_focus_parser = subparsers.add_parser("compare-shader-focus")
@@ -130,7 +137,14 @@ def _build_parser() -> argparse.ArgumentParser:
     compare_shader_focus_parser.add_argument("--limit", type=int, default=10)
     compare_shader_focus_parser.add_argument("--hotspot-limit", type=int, default=8)
     compare_shader_focus_parser.add_argument("--code-object-index", type=int, default=None)
+    compare_shader_focus_parser.add_argument("--source-file", type=Path, default=None)
+    compare_shader_focus_parser.add_argument("--source-excerpt", action="store_true")
     compare_shader_focus_parser.add_argument("--no-cache", action="store_true")
+
+    metrics_parser = subparsers.add_parser("metrics-doc")
+    metrics_parser.add_argument("--json", action="store_true", dest="as_json")
+    metrics_parser.add_argument("--format", choices=("report", "markdown"), default="report")
+    metrics_parser.add_argument("--section-title", default="Metrics Reference")
 
     return parser
 
@@ -187,12 +201,23 @@ def main() -> int:
                 limit=args.limit,
                 hotspot_limit=args.hotspot_limit,
                 code_object_index=args.code_object_index,
+                source_file=args.source_file,
                 use_cache=not args.no_cache,
             ),
         )
         if args.as_json:
             return _json_output(payload)
-        print(render_compare_shader_focus_payload(payload))
+        print(render_compare_shader_focus_payload(payload, source_excerpt=args.source_excerpt))
+        return 0
+
+    if args.command == "metrics-doc":
+        payload = metrics_reference_payload()
+        if args.as_json:
+            return _json_output(payload)
+        if args.format == "markdown":
+            print(render_metrics_reference_markdown(payload, title=args.section_title), end="")
+        else:
+            print(render_metrics_reference_report_section(payload, title=args.section_title))
         return 0
 
     session = load_capture(args.rgp_file)
@@ -287,12 +312,13 @@ def main() -> int:
                 limit=args.limit,
                 hotspot_limit=args.hotspot_limit,
                 code_object_index=args.code_object_index,
+                source_file=args.source_file,
                 use_cache=not args.no_cache,
             ),
         )
         if args.as_json:
             return _json_output(payload)
-        print(render_shader_focus_payload(payload))
+        print(render_shader_focus_payload(payload, source_excerpt=args.source_excerpt))
         return 0
 
     parser.error(f"unsupported command: {args.command}")

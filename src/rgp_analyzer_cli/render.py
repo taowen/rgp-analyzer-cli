@@ -20,6 +20,14 @@ def _fmt_ratio_pct(value: Any) -> str:
     return "n/a"
 
 
+def _fmt_metric_row(item: dict[str, Any]) -> str:
+    return (
+        f"metric={item.get('name')} "
+        f"value={_fmt_float(item.get('value'))} "
+        f"threshold={_fmt_float(item.get('threshold'))}"
+    )
+
+
 def render_inspect(session_report: dict[str, Any], *, limit: int = 10) -> str:
     return render_v1_inspect(session_report, limit=limit)
 
@@ -168,8 +176,7 @@ def render_triage_payload(payload: dict[str, Any]) -> str:
     if profiling_constraints:
         line = (
             "  profiling_constraints: "
-            f"submit_dilution_suspected={profiling_constraints.get('submit_dilution_suspected')} "
-            f"reason={profiling_constraints.get('reason')}"
+            f"submit_dilution_suspected={profiling_constraints.get('submit_dilution_suspected')}"
         )
         if profiling_constraints.get("sqtt_trace_bytes") is not None:
             line += f" sqtt_bytes={profiling_constraints.get('sqtt_trace_bytes')}"
@@ -329,7 +336,7 @@ def render_compare_capture_payload(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def render_shader_focus_payload(payload: dict[str, Any]) -> str:
+def render_shader_focus_payload(payload: dict[str, Any], *, source_excerpt: bool = False) -> str:
     lines = ["shader_focus:"]
     lines.append(f"  file: {payload.get('file')}")
     lines.append(f"  focus_code_object: {payload.get('focus_code_object_index')}")
@@ -350,8 +357,7 @@ def render_shader_focus_payload(payload: dict[str, Any]) -> str:
     if profiling_constraints:
         lines.append(
             "  profiling_constraints: "
-            f"submit_dilution_suspected={profiling_constraints.get('submit_dilution_suspected')} "
-            f"reason={profiling_constraints.get('reason')}"
+            f"submit_dilution_suspected={profiling_constraints.get('submit_dilution_suspected')}"
         )
     resource = payload.get("resource") or {}
     if resource:
@@ -381,6 +387,8 @@ def render_shader_focus_payload(payload: dict[str, Any]) -> str:
             f"VALU={cats.get('VALU', 0)} SALU={cats.get('SALU', 0)} "
             f"LDS={cats.get('LDS', 0)} VMEM={cats.get('VMEM', 0)} SMEM={cats.get('SMEM', 0)} "
             f"avg_stall={_fmt_float(runtime.get('avg_stall_per_inst'))} "
+            f"stalled_inst_share={_fmt_float(runtime.get('stalled_instruction_share'))} "
+            f"avg_wave_lifetime={_fmt_float(runtime.get('avg_wave_lifetime'))} "
             f"stall_share={_fmt_float(runtime.get('stall_share_of_duration'))} "
             f"occ_avg={_fmt_float(runtime.get('occupancy_average_active'))} "
             f"occ_max={runtime.get('occupancy_max_active')}"
@@ -481,11 +489,14 @@ def render_shader_focus_payload(payload: dict[str, Any]) -> str:
                 f"match_kind={item.get('match_kind')}{symbol_text}{bucket_text}"
             )
             for pc in (item.get("top_pcs") or [])[:3]:
-                lines.append(
+                line = (
                     "      "
                     f"pc=0x{int(pc.get('pc', 0) or 0):x} {pc.get('mnemonic')} {pc.get('operands')} "
                     f"category={pc.get('category')} count={pc.get('count')}"
                 )
+                if pc.get("text"):
+                    line += f" isa=\"{pc.get('text')}\""
+                lines.append(line)
     dispatch_isa = payload.get("dispatch_isa") or {}
     lines.append(
         "  dispatch_isa: "
@@ -503,10 +514,116 @@ def render_shader_focus_payload(payload: dict[str, Any]) -> str:
             if item.get("text"):
                 line += f" isa=\"{item.get('text')}\""
             lines.append(line)
+    instruction_ranking = payload.get("instruction_ranking") or []
+    if instruction_ranking:
+        lines.append("  instruction_ranking:")
+        for item in instruction_ranking[:6]:
+            line = (
+                f"    - pc=0x{int(item.get('pc', 0) or 0):x} {item.get('mnemonic')} {item.get('operands')} "
+                f"category={item.get('category')} dispatch_count={item.get('dispatch_count')} "
+                f"hotspot_mentions={item.get('hotspot_mentions')} score={item.get('score')}"
+            )
+            if item.get("text"):
+                line += f" isa=\"{item.get('text')}\""
+            lines.append(line)
+    memory_access_hints = payload.get("memory_access_hints") or {}
+    if memory_access_hints:
+        proxies = memory_access_hints.get("proxies") or {}
+        lines.append(
+            "  memory_access_hints: "
+            f"global_mem_duration_share={_fmt_float(proxies.get('global_memory_duration_share'))} "
+            f"global_mem_stall_share={_fmt_float(proxies.get('global_memory_stall_share'))} "
+            f"lds_duration_share={_fmt_float(proxies.get('lds_duration_share'))} "
+            f"lds_stall_share={_fmt_float(proxies.get('lds_stall_share'))} "
+            f"lds_stall_per_inst={_fmt_float(proxies.get('lds_stall_per_inst'))}"
+        )
+        for item in (memory_access_hints.get("source_matches") or [])[:4]:
+            lines.append(
+                f"    - line={item.get('line')} match={item.get('match')}"
+            )
+    bottleneck_hints = payload.get("bottleneck_hints") or []
+    if bottleneck_hints:
+        lines.append("  bottleneck_metrics:")
+        for item in bottleneck_hints[:5]:
+            lines.append(
+                "    - "
+                f"metric={item.get('name')} value={_fmt_float(item.get('value'))} "
+                f"threshold={_fmt_float(item.get('threshold'))}"
+            )
+    occupancy_detail = payload.get("occupancy_detail") or {}
+    if occupancy_detail:
+        lines.append(
+            "  occupancy_detail: "
+            f"runtime_average_active={_fmt_float(occupancy_detail.get('runtime_average_active'))} "
+            f"runtime_max_active={occupancy_detail.get('runtime_max_active')} "
+            f"avg_wave_lifetime={_fmt_float(occupancy_detail.get('avg_wave_lifetime'))} "
+            f"max_wave_lifetime={occupancy_detail.get('max_wave_lifetime')} "
+            f"stalled_instruction_share={_fmt_float(occupancy_detail.get('stalled_instruction_share'))} "
+            f"vgpr={occupancy_detail.get('vgpr_count')} "
+            f"lds={occupancy_detail.get('lds_size')} "
+            f"wavefront={occupancy_detail.get('wavefront_size')}"
+        )
+    event_barrier_context = payload.get("event_barrier_context") or {}
+    if event_barrier_context:
+        lines.append(
+            "  event_barrier_context: "
+            f"dispatch_spans={event_barrier_context.get('dispatch_api_span_count')} "
+            f"dispatch_assignments={event_barrier_context.get('dispatch_span_assignment_count')} "
+            f"bind_markers={event_barrier_context.get('bind_marker_count')} "
+            f"cb_spans={event_barrier_context.get('command_buffer_span_count')} "
+            f"barrier_markers={event_barrier_context.get('barrier_marker_count')} "
+            f"barrier_spans={event_barrier_context.get('barrier_span_count')} "
+            f"unmatched_barrier_begins={event_barrier_context.get('unmatched_barrier_begin_count')} "
+            f"dispatches_per_cb={_fmt_float(event_barrier_context.get('dispatches_per_cb'))} "
+            f"barriers_per_dispatch={_fmt_float(event_barrier_context.get('barriers_per_dispatch'))}"
+        )
+    tuning_summary = payload.get("tuning_summary") or {}
+    if tuning_summary:
+        lines.append(
+            "  tuning_summary: "
+            f"dispatches_per_cb={_fmt_float(tuning_summary.get('dispatches_per_cb'))} "
+            f"barriers_per_dispatch={_fmt_float(tuning_summary.get('barriers_per_dispatch'))}"
+        )
+        metric_rows = tuning_summary.get("metric_rows") or []
+        for item in metric_rows[:4]:
+            lines.append(f"    - {_fmt_metric_row(item)}")
+        hot_pcs = tuning_summary.get("hot_pcs") or []
+        for pc in hot_pcs[:4]:
+            lines.append(f"    - hot_pc={pc}")
+        source_lines = tuning_summary.get("source_lines") or []
+        for line in source_lines[:6]:
+            lines.append(f"    - source_line={line}")
+    source_hints = payload.get("source_hints") or {}
+    if source_hints:
+        lines.append(
+            "  source_hints: "
+            f"file={source_hints.get('file')} available={source_hints.get('available')} "
+            f"match_count={source_hints.get('match_count')}"
+        )
+        for item in (source_hints.get("matches") or [])[:6]:
+            lines.append(
+                f"    - line={item.get('line')} match={item.get('match')}"
+            )
+            if source_excerpt:
+                for excerpt in (item.get("excerpt") or [])[:3]:
+                    prefix = ">" if excerpt.get("focus") else " "
+                    lines.append(f"      {prefix}L{excerpt.get('line')}: {excerpt.get('text')}")
+    capabilities = payload.get("capture_capabilities") or {}
+    if capabilities:
+        lines.append(
+            "  capture_capabilities: "
+            f"trace_path={capabilities.get('trace_path')} "
+            f"dynamic_instruction_timing={capabilities.get('has_dynamic_instruction_timing')} "
+            f"dynamic_instruction_count={capabilities.get('has_dynamic_instruction_count')} "
+            f"active_lane_count={capabilities.get('has_active_lane_count')} "
+            f"not_issued_reason={capabilities.get('has_not_issued_reason')} "
+            f"memory_stride={capabilities.get('has_memory_access_stride')} "
+            f"cacheline_efficiency={capabilities.get('has_cacheline_efficiency')}"
+        )
     return "\n".join(lines)
 
 
-def render_compare_shader_focus_payload(payload: dict[str, Any]) -> str:
+def render_compare_shader_focus_payload(payload: dict[str, Any], *, source_excerpt: bool = False) -> str:
     lines = ["compare_shader_focus:"]
     lines.append(f"  baseline: {payload.get('baseline_file')}")
     lines.append(f"  candidate: {payload.get('candidate_file')}")
@@ -515,6 +632,86 @@ def render_compare_shader_focus_payload(payload: dict[str, Any]) -> str:
         "  focus_code_object: "
         f"baseline={focus.get('baseline')} candidate={focus.get('candidate')}"
     )
+    source_files = payload.get("source_files") or {}
+    if source_files:
+        lines.append(
+            "  source_files: "
+            f"baseline={source_files.get('baseline')} "
+            f"candidate={source_files.get('candidate')}"
+        )
+    source_delta_hints = payload.get("source_delta_hints") or []
+    if source_delta_hints:
+        lines.append("  source_delta_hints:")
+        for item in source_delta_hints[:6]:
+            lines.append(
+                f"    - line={item.get('line')} match={item.get('match')}"
+            )
+            if source_excerpt:
+                for excerpt in (item.get("excerpt") or [])[:3]:
+                    prefix = ">" if excerpt.get("focus") else " "
+                    lines.append(f"      {prefix}L{excerpt.get('line')}: {excerpt.get('text')}")
+    bottleneck_hint_deltas = payload.get("bottleneck_hint_deltas") or []
+    if bottleneck_hint_deltas:
+        lines.append("  bottleneck_metric_deltas:")
+        for item in bottleneck_hint_deltas[:5]:
+            delta = item.get("delta") or {}
+            delta_text = ""
+            if delta:
+                delta_text = (
+                    f" value={_fmt_float(delta.get('before'))} -> {_fmt_float(delta.get('after'))} "
+                    f"(delta={_fmt_float(delta.get('delta'))})"
+                )
+            lines.append(
+                "    - "
+                f"metric={item.get('name')} baseline_present={item.get('baseline_present')} "
+                f"candidate_present={item.get('candidate_present')}{delta_text}"
+            )
+    occupancy_detail_deltas = payload.get("occupancy_detail_deltas") or {}
+    if occupancy_detail_deltas:
+        lines.append("  occupancy_detail_deltas:")
+        for key, item in occupancy_detail_deltas.items():
+            line = f"    - {key}: {item.get('before')} -> {item.get('after')} (delta={item.get('delta')}"
+            ratio = item.get("delta_ratio")
+            if isinstance(ratio, (int, float)):
+                line += f", ratio={ratio:.3f}"
+            line += ")"
+            lines.append(line)
+    event_barrier_context_deltas = payload.get("event_barrier_context_deltas") or {}
+    if event_barrier_context_deltas:
+        lines.append("  event_barrier_context_deltas:")
+        for key, item in event_barrier_context_deltas.items():
+            line = f"    - {key}: {item.get('before')} -> {item.get('after')} (delta={item.get('delta')}"
+            ratio = item.get("delta_ratio")
+            if isinstance(ratio, (int, float)):
+                line += f", ratio={ratio:.3f}"
+            line += ")"
+            lines.append(line)
+    tuning_summary_delta = payload.get("tuning_summary_delta") or {}
+    if tuning_summary_delta:
+        lines.append("  tuning_summary_delta:")
+        baseline_metric_rows = tuning_summary_delta.get("baseline_metric_rows") or []
+        candidate_metric_rows = tuning_summary_delta.get("candidate_metric_rows") or []
+        max_rows = max(len(baseline_metric_rows), len(candidate_metric_rows))
+        for idx in range(min(max_rows, 4)):
+            baseline_item = baseline_metric_rows[idx] if idx < len(baseline_metric_rows) else {}
+            candidate_item = candidate_metric_rows[idx] if idx < len(candidate_metric_rows) else {}
+            lines.append(
+                "    - "
+                f"baseline[{idx}] {_fmt_metric_row(baseline_item)} "
+                f"candidate[{idx}] {_fmt_metric_row(candidate_item)}"
+            )
+        baseline_hot_pcs = tuning_summary_delta.get("baseline_hot_pcs") or []
+        candidate_hot_pcs = tuning_summary_delta.get("candidate_hot_pcs") or []
+        for idx in range(min(max(len(baseline_hot_pcs), len(candidate_hot_pcs)), 4)):
+            before = baseline_hot_pcs[idx] if idx < len(baseline_hot_pcs) else None
+            after = candidate_hot_pcs[idx] if idx < len(candidate_hot_pcs) else None
+            lines.append(f"    - hot_pc[{idx}] baseline={before} candidate={after}")
+        baseline_source_lines = tuning_summary_delta.get("baseline_source_lines") or []
+        candidate_source_lines = tuning_summary_delta.get("candidate_source_lines") or []
+        for idx in range(min(max(len(baseline_source_lines), len(candidate_source_lines)), 6)):
+            before = baseline_source_lines[idx] if idx < len(baseline_source_lines) else None
+            after = candidate_source_lines[idx] if idx < len(candidate_source_lines) else None
+            lines.append(f"    - source_line[{idx}] baseline={before} candidate={after}")
     enough = payload.get("enough_for_shader_tuning") or {}
     lines.append(
         "  enough_for_shader_tuning: "
@@ -564,6 +761,78 @@ def render_compare_shader_focus_payload(payload: dict[str, Any]) -> str:
                 f"    - {item.get('signature')}: {item.get('before')} -> {item.get('after')} "
                 f"(delta={item.get('delta')})"
             )
+    instruction_ranking = payload.get("instruction_ranking_delta") or []
+    if instruction_ranking:
+        lines.append("  instruction_ranking_delta:")
+        for item in instruction_ranking[:6]:
+            score = item.get("score") or {}
+            dispatch_count = item.get("dispatch_count") or {}
+            hotspot_mentions = item.get("hotspot_mentions") or {}
+            hotspot_duration = item.get("hotspot_duration") or {}
+            hotspot_stall = item.get("hotspot_stall") or {}
+            parts = []
+            if score:
+                parts.append(
+                    f"score {score.get('before')} -> {score.get('after')} "
+                    f"(delta={score.get('delta')})"
+                )
+            if dispatch_count:
+                parts.append(
+                    f"dispatch_count {dispatch_count.get('before')} -> {dispatch_count.get('after')} "
+                    f"(delta={dispatch_count.get('delta')})"
+                )
+            if hotspot_mentions:
+                parts.append(
+                    f"hotspot_mentions {hotspot_mentions.get('before')} -> {hotspot_mentions.get('after')} "
+                    f"(delta={hotspot_mentions.get('delta')})"
+                )
+            if hotspot_duration:
+                parts.append(
+                    f"hotspot_duration {hotspot_duration.get('before')} -> {hotspot_duration.get('after')} "
+                    f"(delta={hotspot_duration.get('delta')})"
+                )
+            if hotspot_stall:
+                parts.append(
+                    f"hotspot_stall {hotspot_stall.get('before')} -> {hotspot_stall.get('after')} "
+                    f"(delta={hotspot_stall.get('delta')})"
+                )
+            line = f"    - {item.get('signature')}: " + "; ".join(parts)
+            if item.get("text"):
+                line += f" isa=\"{item.get('text')}\""
+            lines.append(line)
+    focused_runtime_hotspots = payload.get("focused_runtime_hotspot_deltas") or []
+    if focused_runtime_hotspots:
+        lines.append("  focused_runtime_hotspot_deltas:")
+        for item in focused_runtime_hotspots[:3]:
+            duration = item.get("duration") or {}
+            stall = item.get("stall") or {}
+            avg_duration = item.get("avg_duration_per_hit") or {}
+            avg_stall = item.get("avg_stall_per_hit") or {}
+            line = f"    - {item.get('signature')}:"
+            parts = []
+            if duration:
+                parts.append(
+                    f"duration {duration.get('before')} -> {duration.get('after')} (delta={duration.get('delta')})"
+                )
+            if stall:
+                parts.append(
+                    f"stall {stall.get('before')} -> {stall.get('after')} (delta={stall.get('delta')})"
+                )
+            if avg_duration:
+                parts.append(
+                    f"avg_duration { _fmt_float(avg_duration.get('before')) } -> { _fmt_float(avg_duration.get('after')) }"
+                )
+            if avg_stall:
+                parts.append(
+                    f"avg_stall { _fmt_float(avg_stall.get('before')) } -> { _fmt_float(avg_stall.get('after')) }"
+                )
+            lines.append(line + " " + "; ".join(parts))
+            top_pcs = item.get("top_pcs") or []
+            for pc in top_pcs[:3]:
+                lines.append(
+                    f"      pc_delta {pc.get('signature')}: {pc.get('before')} -> {pc.get('after')} "
+                    f"(delta={pc.get('delta')})"
+                )
     runtime_deltas = payload.get("runtime_deltas") or {}
     category_deltas = payload.get("runtime_category_count_deltas") or {}
     category_duration_deltas = payload.get("runtime_category_duration_deltas") or {}

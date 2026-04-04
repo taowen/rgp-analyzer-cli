@@ -217,10 +217,9 @@ void main() {
             barrier();
         }
 
-        // On the current AMD flash-attn path, force the non-cached Q path so we can
-        // directly test whether Q register caching is driving the focused shader's
-        // VGPR-heavy / WAIT-heavy behavior.
-        if (false) {
+        // More d iterations means Q register caching becomes relevant
+        // Few iterations means the additional registers needed are worse than the speed-up from caching
+        if (HSK_per_thread / 4 > 4) {
             [[unroll]] for (uint32_t d = 0; d < HSK_per_thread / 4; ++d) {
                 FLOAT_TYPEV4 Q_cache[rows_per_thread];
                 [[unroll]] for (uint32_t r = 0; r < rows_per_thread; ++r) {

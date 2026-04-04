@@ -208,6 +208,7 @@ def shader_focus_payload(session: CaptureSession, options: ShaderFocusOptions) -
         code_object_index=options.code_object_index,
         report=session.report,
         isa_tool=options.isa_tool,
+        source_file=options.source_file,
     )
     payload["file"] = str(session.path)
     return payload
@@ -229,6 +230,7 @@ def compare_shader_focus_payload(
             limit=options.limit,
             hotspot_limit=options.hotspot_limit,
             code_object_index=options.code_object_index,
+            source_file=options.source_file,
             use_cache=options.use_cache,
         ),
     )
@@ -243,6 +245,7 @@ def compare_shader_focus_payload(
             limit=options.limit,
             hotspot_limit=options.hotspot_limit,
             code_object_index=options.code_object_index,
+            source_file=options.source_file,
             use_cache=options.use_cache,
         ),
     )

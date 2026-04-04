@@ -44,3 +44,7 @@ examples/z-image-turbo-rgp/app/vulkan-spv-noext-tmp/
 examples/z-image-turbo-rgp/app/tools/mtmd/test-1.jpeg
 examples/z-image-turbo-rgp/app/tools/mtmd/test-2.mp3
 examples/z-image-turbo-rgp/src/__pycache__/
+
+# tutorial chapter outputs
+vulkan-to-7900xtx-isa-tutorial/**/build/
+vulkan-to-7900xtx-isa-tutorial/**/captures/*.rgp

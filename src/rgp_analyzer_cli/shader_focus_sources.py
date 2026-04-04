@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import re
 
 
 def build_source_hints(
@@ -133,4 +134,85 @@ def build_source_delta_hints(
             )
             if len(rows) >= 6:
                 return rows
+    return rows
+
+
+def build_source_isa_blocks(
+    source_file: Path | None,
+    instructions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if source_file is None:
+        return []
+    path = Path(source_file)
+    if not path.exists() or not path.is_file():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+
+    source_patterns: list[tuple[str, tuple[re.Pattern[str], ...], tuple[re.Pattern[str], ...]]] = [
+        (
+            "invocation_index",
+            (re.compile(r"\bgl_GlobalInvocationID\.x\b"),),
+            (re.compile(r"^v_lshl_add_u32$"), re.compile(r"^v_lshlrev_b32"),),
+        ),
+        (
+            "bounds_check",
+            (re.compile(r"\bif\s*\(.*>=.*element_count"), re.compile(r"\breturn\s*;")),
+            (re.compile(r"^v_cmp"), re.compile(r"^s_cbranch"),),
+        ),
+        (
+            "push_constant_load",
+            (re.compile(r"\bpc\.(element_count|multiplier|bias)\b"),),
+            (re.compile(r"^s_load"),),
+        ),
+        (
+            "value_compute",
+            (re.compile(r"\bidx\s*\*\s*pc\.multiplier\b"), re.compile(r"\+\s*pc\.bias\b")),
+            (re.compile(r"^v_mul"), re.compile(r"^v_add"),),
+        ),
+        (
+            "buffer_store",
+            (re.compile(r"\bout_buf\.data\s*\["),),
+            (re.compile(r"^s_waitcnt$"), re.compile(r"^buffer_store"),),
+        ),
+        (
+            "kernel_end",
+            (re.compile(r"^\s*}\s*$"),),
+            (re.compile(r"^s_sendmsg$"), re.compile(r"^s_endpgm$"),),
+        ),
+    ]
+
+    rows: list[dict[str, Any]] = []
+    for label, source_regexes, isa_regexes in source_patterns:
+        matched_lines: list[dict[str, Any]] = []
+        for lineno, line in enumerate(lines, start=1):
+            if any(regex.search(line) for regex in source_regexes):
+                matched_lines.append({"line": lineno, "match": line.strip()})
+        if not matched_lines:
+            continue
+
+        matched_instructions: list[dict[str, Any]] = []
+        for item in instructions:
+            mnemonic = str(item.get("mnemonic") or "")
+            if any(regex.search(mnemonic) for regex in isa_regexes):
+                matched_instructions.append(
+                    {
+                        "pc": int(item.get("pc", 0) or 0),
+                        "mnemonic": mnemonic,
+                        "operands": item.get("operands"),
+                        "text": item.get("text"),
+                    }
+                )
+        if not matched_instructions:
+            continue
+
+        rows.append(
+            {
+                "label": label,
+                "source_lines": matched_lines[:4],
+                "isa_instructions": matched_instructions[:6],
+            }
+        )
     return rows

@@ -12,6 +12,8 @@ from .parser import parse_rgp
 from .resource_metadata import extract_resource_metadata
 from .shader_triage import shader_triage
 from .shader_focus import build_shader_focus_payload, compare_shader_focus_payloads
+from .shader_focus_instructions import load_disassembly
+from .shader_focus_sources import build_source_hints, build_source_isa_blocks
 from .tinygrad_support.isa_map import map_dispatch_spans_to_isa
 from .capture_compare import compare_triage_payloads
 
@@ -212,6 +214,51 @@ def shader_focus_payload(session: CaptureSession, options: ShaderFocusOptions) -
     )
     payload["file"] = str(session.path)
     return payload
+
+
+def code_object_isa_payload(
+    session: CaptureSession,
+    options: ShaderFocusOptions,
+    *,
+    limit: int = 32,
+    symbol: str = "_amdgpu_cs_main",
+) -> dict[str, Any]:
+    focus = shader_focus_payload(session, options)
+    focus_index = focus.get("focus_code_object_index")
+    disassembly = load_disassembly(session.report, focus_index, options.isa_tool)
+    instructions = [
+        {
+            "pc": pc,
+            "mnemonic": item.get("mnemonic"),
+            "operands": item.get("operands"),
+            "text": item.get("text"),
+            "branch_target": item.get("branch_target"),
+        }
+        for pc, item in sorted(disassembly.items(), key=lambda kv: kv[0])[:limit]
+    ]
+    source_hints = {}
+    source_isa_blocks: list[dict[str, Any]] = []
+    if options.source_file is not None:
+        source_hints = build_source_hints(
+            options.source_file,
+            focus.get("runtime_proxies") or {},
+            focus.get("runtime_hotspot_candidates") or [],
+            (focus.get("dispatch_isa") or {}).get("top_pcs") or [],
+        )
+        source_isa_blocks = build_source_isa_blocks(options.source_file, instructions)
+    return {
+        "file": str(session.path),
+        "focus_code_object_index": focus_index,
+        "entry_point": (focus.get("resource") or {}).get("entry_point"),
+        "symbol": symbol,
+        "trace_quality": focus.get("trace_quality") or {},
+        "profiling_constraints": focus.get("profiling_constraints") or {},
+        "dispatch_isa": focus.get("dispatch_isa") or {},
+        "source_hints": source_hints,
+        "source_isa_blocks": source_isa_blocks,
+        "top_pcs": (focus.get("dispatch_isa") or {}).get("top_pcs") or [],
+        "instructions": instructions,
+    }
 
 
 def compare_shader_focus_payload(

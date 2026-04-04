@@ -336,6 +336,61 @@ def render_compare_capture_payload(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_code_object_isa_payload(payload: dict[str, Any]) -> str:
+    lines = ["code_object_isa:"]
+    lines.append(f"  file: {payload.get('file')}")
+    lines.append(f"  focus_code_object: {payload.get('focus_code_object_index')}")
+    lines.append(f"  entry_point: {payload.get('entry_point')}")
+    lines.append(f"  symbol: {payload.get('symbol')}")
+    source_hints = payload.get("source_hints") or {}
+    if source_hints:
+        lines.append(
+            "  source_hints: "
+            f"file={source_hints.get('file')} available={source_hints.get('available')} "
+            f"match_count={source_hints.get('match_count')}"
+        )
+        for item in (source_hints.get("matches") or [])[:8]:
+            lines.append(f"    - line={item.get('line')} match={item.get('match')}")
+    source_isa_blocks = payload.get("source_isa_blocks") or []
+    if source_isa_blocks:
+        lines.append("  source_isa_blocks:")
+        for block in source_isa_blocks[:8]:
+            lines.append(f"    - label={block.get('label')}")
+            for src in (block.get("source_lines") or [])[:4]:
+                lines.append(f"      source line={src.get('line')} match={src.get('match')}")
+            for ins in (block.get("isa_instructions") or [])[:6]:
+                line = (
+                    f"      isa pc=0x{int(ins.get('pc', 0) or 0):x} "
+                    f"{ins.get('mnemonic')} {ins.get('operands')}"
+                )
+                if ins.get("text"):
+                    line += f" isa=\"{ins.get('text')}\""
+                lines.append(line)
+    top_pcs = payload.get("top_pcs") or []
+    if top_pcs:
+        lines.append("  top_pcs:")
+        for item in top_pcs[:8]:
+            line = (
+                f"    - pc=0x{int(item.get('pc', 0) or 0):x} "
+                f"{item.get('mnemonic')} {item.get('operands')}"
+            )
+            if item.get("text"):
+                line += f" isa=\"{item.get('text')}\""
+            lines.append(line)
+    instructions = payload.get("instructions") or []
+    if instructions:
+        lines.append("  isa:")
+        for item in instructions:
+            line = (
+                f"    - pc=0x{int(item.get('pc', 0) or 0):x} "
+                f"{item.get('mnemonic')} {item.get('operands')}"
+            )
+            if item.get("text"):
+                line += f" isa=\"{item.get('text')}\""
+            lines.append(line)
+    return "\n".join(lines)
+
+
 def render_shader_focus_payload(payload: dict[str, Any], *, source_excerpt: bool = False) -> str:
     lines = ["shader_focus:"]
     lines.append(f"  file: {payload.get('file')}")

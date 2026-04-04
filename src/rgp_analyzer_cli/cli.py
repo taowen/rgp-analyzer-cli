@@ -10,8 +10,9 @@ from .metrics_reference import (
     render_metrics_reference_markdown,
     render_metrics_reference_report_section,
 )
-from .models import CompareOptions, DecodeOptions, DispatchIsaOptions, TriageOptions
+from .models import CompareOptions, DecodeOptions, DispatchIsaOptions, ShaderFocusOptions, TriageOptions
 from .render import (
+    render_code_object_isa_payload,
     render_compare_capture_payload,
     render_compare_shader_focus_payload,
     render_decode_payload,
@@ -23,6 +24,7 @@ from .render import (
     render_triage_payload,
 )
 from .services import (
+    code_object_isa_payload,
     compare_capture_payload,
     compare_shader_focus_payload,
     decode_payload,
@@ -141,6 +143,21 @@ def _build_parser() -> argparse.ArgumentParser:
     compare_shader_focus_parser.add_argument("--source-excerpt", action="store_true")
     compare_shader_focus_parser.add_argument("--no-cache", action="store_true")
 
+    code_object_isa_parser = subparsers.add_parser("code-object-isa")
+    add_capture(code_object_isa_parser)
+    code_object_isa_parser.add_argument("--build-helper", action="store_true")
+    code_object_isa_parser.add_argument("--helper", type=Path, default=None)
+    code_object_isa_parser.add_argument("--decoder-lib-dir", type=Path, default=None)
+    code_object_isa_parser.add_argument("--isa-tool", default=None)
+    code_object_isa_parser.add_argument("--readelf-tool", default=None)
+    code_object_isa_parser.add_argument("--limit", type=int, default=10)
+    code_object_isa_parser.add_argument("--hotspot-limit", type=int, default=8)
+    code_object_isa_parser.add_argument("--code-object-index", type=int, default=None)
+    code_object_isa_parser.add_argument("--source-file", type=Path, default=None)
+    code_object_isa_parser.add_argument("--symbol", default="_amdgpu_cs_main")
+    code_object_isa_parser.add_argument("--isa-limit", type=int, default=32)
+    code_object_isa_parser.add_argument("--no-cache", action="store_true")
+
     metrics_parser = subparsers.add_parser("metrics-doc")
     metrics_parser.add_argument("--json", action="store_true", dest="as_json")
     metrics_parser.add_argument("--format", choices=("report", "markdown"), default="report")
@@ -208,6 +225,30 @@ def main() -> int:
         if args.as_json:
             return _json_output(payload)
         print(render_compare_shader_focus_payload(payload, source_excerpt=args.source_excerpt))
+        return 0
+
+    if args.command == "code-object-isa":
+        session = load_capture(args.rgp_file)
+        payload = code_object_isa_payload(
+            session,
+            ShaderFocusOptions(
+                build_helper=args.build_helper,
+                helper=args.helper,
+                decoder_lib_dir=args.decoder_lib_dir,
+                isa_tool=args.isa_tool,
+                readelf_tool=args.readelf_tool,
+                limit=args.limit,
+                hotspot_limit=args.hotspot_limit,
+                code_object_index=args.code_object_index,
+                source_file=args.source_file,
+                use_cache=not args.no_cache,
+            ),
+            limit=args.isa_limit,
+            symbol=args.symbol,
+        )
+        if args.as_json:
+            return _json_output(payload)
+        print(render_code_object_isa_payload(payload))
         return 0
 
     if args.command == "metrics-doc":
@@ -299,8 +340,6 @@ def main() -> int:
         return 0
 
     if args.command == "shader-focus":
-        from .models import ShaderFocusOptions
-
         payload = shader_focus_payload(
             session,
             ShaderFocusOptions(

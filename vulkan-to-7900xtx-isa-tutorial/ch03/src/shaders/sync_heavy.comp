@@ -1,0 +1,40 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer InputBuffer {
+    uint data[];
+} in_buf;
+
+layout(set = 0, binding = 1) buffer OutputBuffer {
+    uint data[];
+} out_buf;
+
+layout(push_constant) uniform PushConstants {
+    uint element_count;
+    uint multiplier;
+    uint bias;
+} pc;
+
+shared uint tile[64];
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    uint lid = gl_LocalInvocationID.x;
+    if (idx >= pc.element_count) {
+        return;
+    }
+
+    uint base = in_buf.data[idx] * pc.multiplier + pc.bias;
+    tile[lid] = base;
+    barrier();
+
+    uint neighbor = tile[(lid + 1u) & 63u];
+    barrier();
+
+    uint value = base + (neighbor & 1u);
+    tile[lid] = value;
+    barrier();
+
+    out_buf.data[idx] = tile[lid];
+}

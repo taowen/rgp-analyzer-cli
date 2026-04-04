@@ -1,0 +1,48 @@
+#version 450
+
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_KHR_cooperative_matrix : require
+#extension GL_KHR_memory_scope_semantics : require
+#extension GL_KHR_shader_subgroup_basic : require
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer MatrixA { float16_t data[]; } mat_a;
+layout(set = 0, binding = 1) readonly buffer MatrixB { float16_t data[]; } mat_b;
+layout(set = 0, binding = 2) buffer MatrixC { float data[]; } mat_c;
+
+layout(push_constant) uniform PushConstants {
+    uint matrix_size;
+} pc;
+
+void main() {
+    uint tile_col = gl_WorkGroupID.x;
+    uint tile_row = gl_WorkGroupID.y;
+
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc =
+        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+
+    for (uint tile_k = 0; tile_k < pc.matrix_size; tile_k += 32u) {
+        uint a0_offset = (tile_row * 16u) * pc.matrix_size + tile_k;
+        uint b0_offset = (tile_col * 16u) * pc.matrix_size + tile_k;
+
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> a0_tile;
+        coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> b0_tile;
+        coopMatLoad(a0_tile, mat_a.data, a0_offset, pc.matrix_size, gl_CooperativeMatrixLayoutRowMajor);
+        coopMatLoad(b0_tile, mat_b.data, b0_offset, pc.matrix_size, gl_CooperativeMatrixLayoutColumnMajor);
+        acc = coopMatMulAdd(a0_tile, b0_tile, acc);
+
+        if (tile_k + 16u < pc.matrix_size) {
+            uint a1_offset = a0_offset + 16u;
+            uint b1_offset = b0_offset + 16u;
+            coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> a1_tile;
+            coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> b1_tile;
+            coopMatLoad(a1_tile, mat_a.data, a1_offset, pc.matrix_size, gl_CooperativeMatrixLayoutRowMajor);
+            coopMatLoad(b1_tile, mat_b.data, b1_offset, pc.matrix_size, gl_CooperativeMatrixLayoutColumnMajor);
+            acc = coopMatMulAdd(a1_tile, b1_tile, acc);
+        }
+    }
+
+    uint c_offset = (tile_row * 16u) * pc.matrix_size + tile_col * 16u;
+    coopMatStore(acc, mat_c.data, c_offset, pc.matrix_size, gl_CooperativeMatrixLayoutRowMajor);
+}

@@ -153,6 +153,48 @@ def build_source_isa_blocks(
 
     source_patterns: list[tuple[str, tuple[re.Pattern[str], ...], tuple[re.Pattern[str], ...]]] = [
         (
+            "tile_staging",
+            (
+                re.compile(r"\bktile\b"),
+                re.compile(r"\bvtile\b"),
+                re.compile(r"\bkscale_tile\b"),
+            ),
+            (re.compile(r"^ds_(read|write)"), re.compile(r"^buffer_load"), re.compile(r"^global_load"),),
+        ),
+        (
+            "quantized_qk",
+            (
+                re.compile(r"\bq_i8\b"),
+                re.compile(r"\bk_i8\b"),
+                re.compile(r"\bq_scale\b"),
+                re.compile(r"\bk_scale\b"),
+                re.compile(r"\bq_deq\b"),
+                re.compile(r"\bkv\b"),
+            ),
+            (re.compile(r"^v_mul"), re.compile(r"^v_dot"), re.compile(r"^v_mad"), re.compile(r"^v_add"),),
+        ),
+        (
+            "softmax_update",
+            (
+                re.compile(r"\brow_m\b"),
+                re.compile(r"\brow_l\b"),
+                re.compile(r"\btile_alpha\b"),
+                re.compile(r"\btile_beta\b"),
+                re.compile(r"\bexp\s*\("),
+                re.compile(r"\bmax\s*\("),
+            ),
+            (re.compile(r"^v_max"), re.compile(r"^v_exp"), re.compile(r"^s_waitcnt$"), re.compile(r"^v_add"),),
+        ),
+        (
+            "value_accumulate",
+            (
+                re.compile(r"\bacc\s*="),
+                re.compile(r"\bout_data\b"),
+                re.compile(r"\bload_v_value\b"),
+            ),
+            (re.compile(r"^v_mac"), re.compile(r"^v_fmac"), re.compile(r"^v_mul"), re.compile(r"^buffer_store"),),
+        ),
+        (
             "invocation_index",
             (re.compile(r"\bgl_GlobalInvocationID\.x\b"),),
             (re.compile(r"^v_lshl_add_u32$"), re.compile(r"^v_lshlrev_b32"),),
@@ -168,9 +210,29 @@ def build_source_isa_blocks(
             (re.compile(r"^s_load"),),
         ),
         (
+            "global_load",
+            (re.compile(r"\bin_buf\.data\s*\["), re.compile(r"\binput\w*\s*="),),
+            (re.compile(r"^buffer_load"),),
+        ),
+        (
+            "cooperative_matrix",
+            (
+                re.compile(r"\bcoopmat<"),
+                re.compile(r"\bcoopMatLoad\s*\("),
+                re.compile(r"\bcoopMatMulAdd\s*\("),
+                re.compile(r"\bcoopMatStore\s*\("),
+            ),
+            (re.compile(r"wmma", re.IGNORECASE), re.compile(r"mfma", re.IGNORECASE),),
+        ),
+        (
             "value_compute",
             (re.compile(r"\bidx\s*\*\s*pc\.multiplier\b"), re.compile(r"\+\s*pc\.bias\b")),
             (re.compile(r"^v_mul"), re.compile(r"^v_add"),),
+        ),
+        (
+            "shared_exchange",
+            (re.compile(r"\bshared\b"), re.compile(r"\bbarrier\s*\("),),
+            (re.compile(r"^ds_(read|write)"), re.compile(r"^s_barrier$"), re.compile(r"^s_waitcnt$"),),
         ),
         (
             "buffer_store",
@@ -216,3 +278,4 @@ def build_source_isa_blocks(
             }
         )
     return rows
+

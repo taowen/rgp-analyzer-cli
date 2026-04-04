@@ -1,0 +1,36 @@
+#version 450
+
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_KHR_cooperative_matrix : require
+#extension GL_KHR_memory_scope_semantics : require
+#extension GL_KHR_shader_subgroup_basic : require
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer MatrixA {
+    float16_t data[];
+} mat_a;
+
+layout(set = 0, binding = 1) readonly buffer MatrixB {
+    float16_t data[];
+} mat_b;
+
+layout(set = 0, binding = 2) buffer MatrixC {
+    float data[];
+} mat_c;
+
+layout(push_constant) uniform PushConstants {
+    uint matrix_size;
+} pc;
+
+void main() {
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> mat_a_tile;
+    coopmat<float16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> mat_b_tile;
+    coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> mat_c_tile =
+        coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+
+    coopMatLoad(mat_a_tile, mat_a.data, 0, 16, gl_CooperativeMatrixLayoutRowMajor);
+    coopMatLoad(mat_b_tile, mat_b.data, 0, 16, gl_CooperativeMatrixLayoutColumnMajor);
+    mat_c_tile = coopMatMulAdd(mat_a_tile, mat_b_tile, mat_c_tile);
+    coopMatStore(mat_c_tile, mat_c.data, 0, 16, gl_CooperativeMatrixLayoutRowMajor);
+}

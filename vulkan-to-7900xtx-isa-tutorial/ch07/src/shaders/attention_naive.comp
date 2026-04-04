@@ -1,0 +1,81 @@
+#version 460
+
+#extension GL_KHR_shader_subgroup_arithmetic : require
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) readonly buffer QBuffer {
+    float q[];
+};
+
+layout(set = 0, binding = 1) readonly buffer KBuffer {
+    float k[];
+};
+
+layout(set = 0, binding = 2) readonly buffer VBuffer {
+    float v[];
+};
+
+layout(set = 0, binding = 3) writeonly buffer OutBuffer {
+    float out_data[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint seq_len;
+    uint head_dim;
+    uint repeats;
+    float scale;
+} pc;
+
+shared float scores[64];
+shared float denom;
+
+uint idx(uint row, uint col, uint width) {
+    return row * width + col;
+}
+
+void main() {
+    uint row = gl_WorkGroupID.x;
+    uint lid = gl_LocalInvocationIndex;
+    if (row >= pc.seq_len || lid >= 64u) {
+        return;
+    }
+
+    for (uint repeat = 0u; repeat < pc.repeats; ++repeat) {
+        for (uint key = 0u; key < pc.seq_len; ++key) {
+            float partial = 0.0;
+            for (uint d = lid; d < pc.head_dim; d += 64u) {
+                partial += q[idx(row, d, pc.head_dim)] * k[idx(key, d, pc.head_dim)];
+            }
+            float score = subgroupAdd(partial) * pc.scale;
+            if (lid == 0u) {
+                scores[key] = score;
+            }
+            barrier();
+        }
+
+        if (lid == 0u) {
+            float max_score = -3.402823466e+38;
+            for (uint key = 0u; key < pc.seq_len; ++key) {
+                max_score = max(max_score, scores[key]);
+            }
+            float sum = 0.0;
+            for (uint key = 0u; key < pc.seq_len; ++key) {
+                scores[key] = exp(scores[key] - max_score);
+                sum += scores[key];
+            }
+            denom = sum;
+        }
+        barrier();
+
+        for (uint d = lid; d < pc.head_dim; d += 64u) {
+            float acc = 0.0;
+            for (uint key = 0u; key < pc.seq_len; ++key) {
+                float weight = scores[key] / denom;
+                acc += weight * v[idx(key, d, pc.head_dim)];
+            }
+            out_data[idx(row, d, pc.head_dim)] = acc;
+        }
+        barrier();
+    }
+}

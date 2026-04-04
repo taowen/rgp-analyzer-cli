@@ -12,6 +12,7 @@ from .metrics_reference import (
 )
 from .models import CompareOptions, DecodeOptions, DispatchIsaOptions, ShaderFocusOptions, TriageOptions
 from .render import (
+    render_compare_region_focus_payload,
     render_code_object_isa_payload,
     render_compare_capture_payload,
     render_compare_shader_focus_payload,
@@ -19,6 +20,7 @@ from .render import (
     render_dispatch_payload,
     render_inspect,
     render_resource_payload,
+    render_region_focus_payload,
     render_shader_focus_payload,
     render_stitch_report,
     render_triage_payload,
@@ -127,6 +129,20 @@ def _build_parser() -> argparse.ArgumentParser:
     shader_focus_parser.add_argument("--source-excerpt", action="store_true")
     shader_focus_parser.add_argument("--no-cache", action="store_true")
 
+    region_focus_parser = subparsers.add_parser("region-focus")
+    add_capture(region_focus_parser)
+    region_focus_parser.add_argument("--build-helper", action="store_true")
+    region_focus_parser.add_argument("--helper", type=Path, default=None)
+    region_focus_parser.add_argument("--decoder-lib-dir", type=Path, default=None)
+    region_focus_parser.add_argument("--isa-tool", default=None)
+    region_focus_parser.add_argument("--readelf-tool", default=None)
+    region_focus_parser.add_argument("--limit", type=int, default=10)
+    region_focus_parser.add_argument("--hotspot-limit", type=int, default=8)
+    region_focus_parser.add_argument("--code-object-index", type=int, default=None)
+    region_focus_parser.add_argument("--source-file", type=Path, required=True)
+    region_focus_parser.add_argument("--source-excerpt", action="store_true")
+    region_focus_parser.add_argument("--no-cache", action="store_true")
+
     compare_shader_focus_parser = subparsers.add_parser("compare-shader-focus")
     compare_shader_focus_parser.add_argument("baseline_rgp", type=Path)
     compare_shader_focus_parser.add_argument("candidate_rgp", type=Path)
@@ -142,6 +158,22 @@ def _build_parser() -> argparse.ArgumentParser:
     compare_shader_focus_parser.add_argument("--source-file", type=Path, default=None)
     compare_shader_focus_parser.add_argument("--source-excerpt", action="store_true")
     compare_shader_focus_parser.add_argument("--no-cache", action="store_true")
+
+    compare_region_focus_parser = subparsers.add_parser("compare-region-focus")
+    compare_region_focus_parser.add_argument("baseline_rgp", type=Path)
+    compare_region_focus_parser.add_argument("candidate_rgp", type=Path)
+    compare_region_focus_parser.add_argument("--json", action="store_true", dest="as_json")
+    compare_region_focus_parser.add_argument("--build-helper", action="store_true")
+    compare_region_focus_parser.add_argument("--helper", type=Path, default=None)
+    compare_region_focus_parser.add_argument("--decoder-lib-dir", type=Path, default=None)
+    compare_region_focus_parser.add_argument("--isa-tool", default=None)
+    compare_region_focus_parser.add_argument("--readelf-tool", default=None)
+    compare_region_focus_parser.add_argument("--limit", type=int, default=10)
+    compare_region_focus_parser.add_argument("--hotspot-limit", type=int, default=8)
+    compare_region_focus_parser.add_argument("--code-object-index", type=int, default=None)
+    compare_region_focus_parser.add_argument("--source-file", type=Path, required=True)
+    compare_region_focus_parser.add_argument("--source-excerpt", action="store_true")
+    compare_region_focus_parser.add_argument("--no-cache", action="store_true")
 
     code_object_isa_parser = subparsers.add_parser("code-object-isa")
     add_capture(code_object_isa_parser)
@@ -225,6 +257,30 @@ def main() -> int:
         if args.as_json:
             return _json_output(payload)
         print(render_compare_shader_focus_payload(payload, source_excerpt=args.source_excerpt))
+        return 0
+
+    if args.command == "compare-region-focus":
+        baseline = load_capture(args.baseline_rgp)
+        candidate = load_capture(args.candidate_rgp)
+        payload = compare_shader_focus_payload(
+            baseline,
+            candidate,
+            CompareOptions(
+                build_helper=args.build_helper,
+                helper=args.helper,
+                decoder_lib_dir=args.decoder_lib_dir,
+                isa_tool=args.isa_tool,
+                readelf_tool=args.readelf_tool,
+                limit=args.limit,
+                hotspot_limit=args.hotspot_limit,
+                code_object_index=args.code_object_index,
+                source_file=args.source_file,
+                use_cache=not args.no_cache,
+            ),
+        )
+        if args.as_json:
+            return _json_output(payload)
+        print(render_compare_region_focus_payload(payload, source_excerpt=args.source_excerpt))
         return 0
 
     if args.command == "code-object-isa":
@@ -358,6 +414,27 @@ def main() -> int:
         if args.as_json:
             return _json_output(payload)
         print(render_shader_focus_payload(payload, source_excerpt=args.source_excerpt))
+        return 0
+
+    if args.command == "region-focus":
+        payload = shader_focus_payload(
+            session,
+            ShaderFocusOptions(
+                build_helper=args.build_helper,
+                helper=args.helper,
+                decoder_lib_dir=args.decoder_lib_dir,
+                isa_tool=args.isa_tool,
+                readelf_tool=args.readelf_tool,
+                limit=args.limit,
+                hotspot_limit=args.hotspot_limit,
+                code_object_index=args.code_object_index,
+                source_file=args.source_file,
+                use_cache=not args.no_cache,
+            ),
+        )
+        if args.as_json:
+            return _json_output(payload)
+        print(render_region_focus_payload(payload, source_excerpt=args.source_excerpt))
         return 0
 
     parser.error(f"unsupported command: {args.command}")

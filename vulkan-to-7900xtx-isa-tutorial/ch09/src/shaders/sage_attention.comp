@@ -1,0 +1,117 @@
+#version 460
+
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_KHR_shader_subgroup_basic : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_EXT_integer_dot_product : require
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 3) readonly buffer QInt8Buffer { uint q_i8_packed[]; };
+layout(set = 0, binding = 4) readonly buffer KInt8Buffer { uint k_i8_packed[]; };
+layout(set = 0, binding = 5) readonly buffer VPackedBuffer { uint v_packed[]; };
+layout(set = 0, binding = 6) readonly buffer QScaleBuffer { float q_scale[]; };
+layout(set = 0, binding = 7) readonly buffer KScaleBuffer { float k_scale[]; };
+layout(set = 0, binding = 8) writeonly buffer OutBuffer { float out_data[]; };
+
+layout(push_constant) uniform PushConstants {
+    uint seq_len;
+    uint head_dim;
+    uint repeats;
+    float scale;
+} pc;
+
+const uint TILE_KEYS = 16u;
+const uint QUANT_BLOCK = 16u;
+shared uint ktile_packed[TILE_KEYS * 16];
+shared float vtile[TILE_KEYS * 64];
+shared float kscale_tile[TILE_KEYS * 4];
+
+uint idx(uint row, uint col, uint width) { return row * width + col; }
+
+void main() {
+    uint row = gl_WorkGroupID.x;
+    uint lid = gl_LocalInvocationIndex;
+    uint blocks_per_row = pc.head_dim / QUANT_BLOCK;
+    uint packed_cols = pc.head_dim / 2u;
+    uint packed_i8_cols = pc.head_dim / 4u;
+    uint q_block = lid / QUANT_BLOCK;
+    uint q_packed_index = idx(row, lid / 4u, pc.head_dim / 4u);
+    if (row >= pc.seq_len) {
+        return;
+    }
+
+    for (uint repeat = 0u; repeat < pc.repeats; ++repeat) {
+        float acc = 0.0;
+        float row_m = -3.402823466e+38;
+        float row_l = 0.0;
+        int q_pack = 0;
+        float qk_scale = 0.0;
+        bool score_lane_active = lid < pc.head_dim && ((lid & 3u) == 0u);
+        if (score_lane_active) {
+            q_pack = int(q_i8_packed[q_packed_index]);
+            qk_scale = q_scale[idx(row, q_block, blocks_per_row)];
+        }
+
+        for (uint base = 0u; base < pc.seq_len; base += TILE_KEYS) {
+            uint tile_n = min(TILE_KEYS, pc.seq_len - base);
+
+            for (uint linear = lid; linear < tile_n * packed_i8_cols; linear += 64u) {
+                uint key = linear / packed_i8_cols;
+                uint pack = linear % packed_i8_cols;
+                ktile_packed[key * packed_i8_cols + pack] = k_i8_packed[idx(base + key, pack, packed_i8_cols)];
+            }
+            for (uint linear = lid; linear < tile_n * packed_cols; linear += 64u) {
+                uint key = linear / packed_cols;
+                uint pair = linear % packed_cols;
+                vec2 unpacked = unpackHalf2x16(v_packed[idx(base + key, pair, packed_cols)]);
+                uint d = pair * 2u;
+                vtile[key * pc.head_dim + d + 0u] = unpacked.x;
+                vtile[key * pc.head_dim + d + 1u] = unpacked.y;
+            }
+            for (uint linear = lid; linear < tile_n * blocks_per_row; linear += 64u) {
+                uint key = linear / blocks_per_row;
+                uint block = linear % blocks_per_row;
+                kscale_tile[key * blocks_per_row + block] = k_scale[idx(base + key, block, blocks_per_row)];
+            }
+            barrier();
+
+            for (uint t = 0u; t < tile_n; ++t) {
+                float partial = 0.0;
+                if (score_lane_active) {
+                    int k_pack = int(ktile_packed[t * packed_i8_cols + (lid / 4u)]);
+                    partial = float(dotPacked4x8EXT(q_pack, k_pack)) *
+                              (qk_scale * kscale_tile[t * blocks_per_row + q_block]);
+                }
+                float score = subgroupBroadcastFirst(subgroupAdd(partial) * pc.scale);
+                float tile_alpha = 0.0;
+                float tile_beta = 0.0;
+                float updated_m = row_m;
+                float updated_l = row_l;
+                if (subgroupElect()) {
+                    updated_m = max(row_m, score);
+                    tile_alpha = exp(row_m - updated_m);
+                    tile_beta = exp(score - updated_m);
+                    updated_l = row_l * tile_alpha + tile_beta;
+                }
+                updated_m = subgroupBroadcastFirst(updated_m);
+                updated_l = subgroupBroadcastFirst(updated_l);
+                tile_alpha = subgroupBroadcastFirst(tile_alpha);
+                tile_beta = subgroupBroadcastFirst(tile_beta);
+                row_m = updated_m;
+                row_l = updated_l;
+
+                if (lid < pc.head_dim) {
+                    acc = acc * tile_alpha + tile_beta * vtile[t * pc.head_dim + lid];
+                }
+            }
+
+            barrier();
+        }
+
+        if (lid < pc.head_dim) {
+            out_data[idx(row, lid, pc.head_dim)] = acc / row_l;
+        }
+    }
+}

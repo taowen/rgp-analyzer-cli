@@ -14,6 +14,22 @@
 
 - `ch01`
   基本开发环境、最小 compute 实验、以及 `Vulkan -> SPIR-V -> AMDGPU ISA -> .rgp` 的对应关系。
+- `ch02`
+  同一个 Vulkan compute harness 的两个 shader 变体，对比资源、ISA 和 runtime 指标怎么变化。
+- `ch03`
+  用三个 shader 变体区分 global-memory、sync/LDS、普通算术三种不同瓶颈信号。
+- `ch04`
+  用 scalar 和 `VK_KHR_cooperative_matrix` 两种 matmul shader，看 7900 XTX 在 Vulkan + RADV 下实际暴露什么矩阵相关信号。
+- `ch05`
+  只用 cooperative matrix / WMMA kernel 变体，演示 tile 复用、K 维展开和寄存器占用之间的取舍。
+- `ch06`
+  用两个数学结果相同的 LDS kernel，演示 clean access 和 conflict access 对 `avg_stall / sync_wait / wave_lifetime` 的影响。
+- `ch07`
+  最小 attention baseline。把 `QK^T -> softmax -> V` 变成可抓 `.rgp`、可看 ISA、可做 source/ISA block 对照的最小 Vulkan compute 实验。
+- `ch08`
+  最小 exact FlashAttention forward。用 `tile + online softmax` 对照 naive attention，真正把 FlashAttention 的前向主循环跑起来。
+- `ch09`
+  最小 SageAttention forward。实现 `smooth_k + qk_int8 + pv_fp16`，再和 exact FlashAttention 做直接对比。
 
 ## Chapter Layout
 

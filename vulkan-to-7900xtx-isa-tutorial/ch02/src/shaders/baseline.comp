@@ -1,0 +1,24 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer OutputBuffer {
+    uint data[];
+} out_buf;
+
+layout(push_constant) uniform PushConstants {
+    uint element_count;
+    uint multiplier;
+    uint bias;
+} pc;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.element_count) {
+        return;
+    }
+
+    uint scaled = idx * pc.multiplier;
+    uint value = scaled + pc.bias;
+    out_buf.data[idx] = value;
+}

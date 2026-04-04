@@ -1,0 +1,46 @@
+#version 450
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) buffer OutputBuffer {
+    uint data[];
+} out_buf;
+
+layout(push_constant) uniform PushConstants {
+    uint element_count;
+    uint multiplier;
+    uint bias;
+} pc;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= pc.element_count) {
+        return;
+    }
+
+    uint a0 = idx;
+    uint a1 = idx + pc.bias;
+    uint a2 = idx ^ pc.multiplier;
+    uint a3 = idx * 3u + 1u;
+
+    uint b0 = a0 * 5u + pc.bias;
+    uint b1 = a1 * 7u + pc.multiplier;
+    uint b2 = a2 * 9u + (pc.bias ^ pc.multiplier);
+    uint b3 = a3 * 11u + idx;
+
+    uint c0 = b0 ^ (b1 >> 1u);
+    uint c1 = b1 ^ (b2 >> 2u);
+    uint c2 = b2 ^ (b3 >> 3u);
+    uint c3 = b3 ^ (b0 >> 1u);
+
+    uint d0 = c0 + a3;
+    uint d1 = c1 + a0;
+    uint d2 = c2 + a1;
+    uint d3 = c3 + a2;
+
+    uint adjust = (d0 ^ d1 ^ d2 ^ d3) & 31u;
+
+    uint scaled = idx * pc.multiplier;
+    uint value = scaled + pc.bias + adjust;
+    out_buf.data[idx] = value;
+}

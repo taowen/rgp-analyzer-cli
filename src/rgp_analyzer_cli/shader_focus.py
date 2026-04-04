@@ -13,6 +13,7 @@ from .shader_focus_instructions import (
     pc_ranking_delta,
     runtime_hotspot_ranking_delta,
 )
+from .shader_focus_regions import build_source_region_deltas, build_source_region_metrics
 from .shader_focus_runtime import (
     build_bottleneck_hint_deltas,
     build_bottleneck_hints,
@@ -24,7 +25,11 @@ from .shader_focus_runtime import (
     category_profile_map,
     field_delta,
 )
-from .shader_focus_sources import build_source_delta_hints, build_source_hints
+from .shader_focus_sources import (
+    build_source_delta_hints,
+    build_source_hints,
+    build_source_isa_blocks,
+)
 
 
 def focus_code_object_index(
@@ -90,7 +95,17 @@ def build_shader_focus_payload(
     hotspot_candidates = focus_hotspot_candidates(decode_stream, focus_index, disassembly)
     annotated_top_pcs = [annotate_pc(item, disassembly) for item in filtered_top_pcs[:8]]
     source_hints = build_source_hints(source_file, runtime_profile, hotspot_candidates, annotated_top_pcs)
+    source_isa_blocks = build_source_isa_blocks(
+        source_file,
+        [{"pc": pc, **item} for pc, item in disassembly.items()],
+    )
     instruction_ranking = build_instruction_ranking(annotated_top_pcs, hotspot_candidates)
+    source_region_metrics = build_source_region_metrics(
+        source_isa_blocks,
+        instruction_ranking,
+        hotspot_candidates,
+        runtime_profile,
+    )
     memory_access_hints = build_memory_access_hints(runtime_profile, source_hints)
     bottleneck_hints = build_bottleneck_hints(runtime_profile, focus_resource, memory_access_hints)
     occupancy_detail = build_occupancy_detail(runtime_profile, focus_resource)
@@ -201,6 +216,8 @@ def build_shader_focus_payload(
             "top_pcs": annotated_top_pcs,
         },
         "instruction_ranking": instruction_ranking,
+        "source_isa_blocks": source_isa_blocks,
+        "source_region_metrics": source_region_metrics,
         "memory_access_hints": memory_access_hints,
         "bottleneck_hints": bottleneck_hints,
         "occupancy_detail": occupancy_detail,
@@ -351,6 +368,10 @@ def compare_shader_focus_payloads(baseline: dict[str, Any], candidate: dict[str,
             baseline.get("source_hints") or {},
             candidate.get("source_hints") or {},
             runtime_proxy_deltas,
+        ),
+        "source_region_deltas": build_source_region_deltas(
+            baseline.get("source_region_metrics") or [],
+            candidate.get("source_region_metrics") or [],
         ),
         "bottleneck_hint_deltas": build_bottleneck_hint_deltas(
             baseline.get("bottleneck_hints") or [],

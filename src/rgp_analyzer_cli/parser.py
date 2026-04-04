@@ -551,7 +551,7 @@ def parse_rgp(path: Path) -> dict[str, Any]:
     while offset + 16 <= len(blob):
         chunk = parse_chunk_header(blob, offset)
         if chunk.size_in_bytes <= 0:
-            raise ValueError(f"invalid chunk size {chunk.size_in_bytes} at offset {offset}")
+            break
 
         chunk_dict = asdict(chunk)
         chunks.append(chunk_dict)

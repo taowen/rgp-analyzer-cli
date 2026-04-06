@@ -1,0 +1,96 @@
+#version 450
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0) readonly buffer InputBuf {
+    float input_data[];
+};
+
+layout(binding = 1) readonly buffer NormBuf {
+    float norm_weight[];
+};
+
+layout(binding = 2) readonly buffer GateWeightBuf {
+    float gate_weight[];
+};
+
+layout(binding = 3) readonly buffer UpWeightBuf {
+    float up_weight[];
+};
+
+layout(binding = 4) readonly buffer DownWeightBuf {
+    float down_weight[];
+};
+
+layout(binding = 5) writeonly buffer MlpDownBuf {
+    float mlp_down_out[];
+};
+
+layout(binding = 6) writeonly buffer LayerOutBuf {
+    float layer_out[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint hidden;
+    uint intermediate;
+    uint seq_len;
+    float eps;
+} pc;
+
+shared float normed[1024];
+shared float actv[3072];
+shared float partial[128];
+
+void main() {
+    const uint lid = gl_LocalInvocationID.x;
+    const uint tok = gl_WorkGroupID.y;
+    if (tok >= pc.seq_len) {
+        return;
+    }
+
+    float sum = 0.0f;
+    for (uint i = lid; i < pc.hidden; i += 128u) {
+        const float x = input_data[tok * pc.hidden + i];
+        normed[i] = x;
+        sum += x * x;
+    }
+    partial[lid] = sum;
+    barrier();
+
+    for (uint stride = 64u; stride > 0u; stride >>= 1u) {
+        if (lid < stride) {
+            partial[lid] += partial[lid + stride];
+        }
+        barrier();
+    }
+
+    const float rms = inversesqrt(partial[0] / float(pc.hidden) + pc.eps);
+    for (uint i = lid; i < pc.hidden; i += 128u) {
+        normed[i] = normed[i] * rms * norm_weight[i];
+    }
+    barrier();
+
+    for (uint j = lid; j < pc.intermediate; j += 128u) {
+        float gate = 0.0f;
+        float up = 0.0f;
+        const uint gate_base = j * pc.hidden;
+        for (uint i = 0u; i < pc.hidden; ++i) {
+            const float x = normed[i];
+            gate = fma(x, gate_weight[gate_base + i], gate);
+            up = fma(x, up_weight[gate_base + i], up);
+        }
+        const float silu = gate / (1.0f + exp(-gate));
+        actv[j] = silu * up;
+    }
+    barrier();
+
+    for (uint o = lid; o < pc.hidden; o += 128u) {
+        float sum_down = 0.0f;
+        const uint down_base = o * pc.intermediate;
+        for (uint j = 0u; j < pc.intermediate; ++j) {
+            sum_down = fma(actv[j], down_weight[down_base + j], sum_down);
+        }
+        mlp_down_out[tok * pc.hidden + o] = sum_down;
+        layer_out[tok * pc.hidden + o] = sum_down + input_data[tok * pc.hidden + o];
+    }
+}

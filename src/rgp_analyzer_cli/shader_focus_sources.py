@@ -158,6 +158,10 @@ def build_source_isa_blocks(
                 re.compile(r"\bktile\b"),
                 re.compile(r"\bvtile\b"),
                 re.compile(r"\bkscale_tile\b"),
+                re.compile(r"\bbuf_a\b"),
+                re.compile(r"\bbuf_b\b"),
+                re.compile(r"\bload_a_to_shmem\b"),
+                re.compile(r"\bload_b_to_shmem\b"),
             ),
             (re.compile(r"^ds_(read|write)"), re.compile(r"^buffer_load"), re.compile(r"^global_load"),),
         ),
@@ -191,6 +195,9 @@ def build_source_isa_blocks(
                 re.compile(r"\bacc\s*="),
                 re.compile(r"\bout_data\b"),
                 re.compile(r"\bload_v_value\b"),
+                re.compile(r"\bsums\b"),
+                re.compile(r"\bfma\s*\("),
+                re.compile(r"\bcoopMatMulAdd\s*\("),
             ),
             (re.compile(r"^v_mac"), re.compile(r"^v_fmac"), re.compile(r"^v_mul"), re.compile(r"^buffer_store"),),
         ),
@@ -240,6 +247,14 @@ def build_source_isa_blocks(
             (re.compile(r"^s_waitcnt$"), re.compile(r"^buffer_store"),),
         ),
         (
+            "output_store",
+            (
+                re.compile(r"\bdata_d\s*\["),
+                re.compile(r"\bcoopMatStore\s*\("),
+            ),
+            (re.compile(r"^s_waitcnt$"), re.compile(r"^buffer_store"), re.compile(r"^global_store"),),
+        ),
+        (
             "kernel_end",
             (re.compile(r"^\s*}\s*$"),),
             (re.compile(r"^s_sendmsg$"), re.compile(r"^s_endpgm$"),),
@@ -278,4 +293,3 @@ def build_source_isa_blocks(
             }
         )
     return rows
-

@@ -9,6 +9,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .DS_Store
+.omx/
+blog/
 
 # local builds
 build/
@@ -48,3 +50,12 @@ examples/z-image-turbo-rgp/src/__pycache__/
 # tutorial chapter outputs
 vulkan-to-7900xtx-isa-tutorial/**/build/
 vulkan-to-7900xtx-isa-tutorial/**/captures/*.rgp
+vulkan-to-7900xtx-isa-tutorial/**/output/
+vulkan-to-7900xtx-isa-tutorial/**/wheels/
+
+# local upstream checkouts
+third_party/OmniVoice/
+third_party/ggml/
+third_party/outetts-ref/
+third_party/tts.cpp-ref/
+third_party/whisper.cpp/

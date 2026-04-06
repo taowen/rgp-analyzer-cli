@@ -1,0 +1,110 @@
+#version 450
+
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+
+layout(binding = 0) readonly buffer InputBuf {
+    float input_data[];
+};
+
+layout(binding = 1) readonly buffer QWeightBuf {
+    float q_weight[];
+};
+
+layout(binding = 2) readonly buffer KWeightBuf {
+    float k_weight[];
+};
+
+layout(binding = 3) readonly buffer QNormBuf {
+    float q_norm_weight[];
+};
+
+layout(binding = 4) readonly buffer KNormBuf {
+    float k_norm_weight[];
+};
+
+layout(binding = 5) writeonly buffer QOutBuf {
+    float q_out[];
+};
+
+layout(binding = 6) writeonly buffer KOutBuf {
+    float k_out[];
+};
+
+layout(push_constant) uniform PushConstants {
+    uint hidden;
+    uint seq_len;
+    uint head_dim;
+    uint n_head;
+    uint n_kv_head;
+    float eps;
+    float theta_scale;
+} pc;
+
+shared float raw_vals[128];
+shared float sum_vals[128];
+
+void main() {
+    const uint d = gl_LocalInvocationID.x;
+    const uint head_global = gl_WorkGroupID.y;
+    const uint tok = gl_WorkGroupID.z;
+
+    if (tok >= pc.seq_len || d >= pc.head_dim) {
+        return;
+    }
+
+    const bool is_q = head_global < pc.n_head;
+    const uint head = is_q ? head_global : (head_global - pc.n_head);
+    const uint num_heads = is_q ? pc.n_head : pc.n_kv_head;
+    if (head >= num_heads) {
+        return;
+    }
+
+    const uint feat = head * pc.head_dim + d;
+    const uint input_base = tok * pc.hidden;
+    const uint weight_base = feat * pc.hidden;
+
+    float acc = 0.0f;
+    if (is_q) {
+        for (uint i = 0; i < pc.hidden; ++i) {
+            acc = fma(input_data[input_base + i], q_weight[weight_base + i], acc);
+        }
+    } else {
+        for (uint i = 0; i < pc.hidden; ++i) {
+            acc = fma(input_data[input_base + i], k_weight[weight_base + i], acc);
+        }
+    }
+
+    raw_vals[d] = acc;
+    sum_vals[d] = acc * acc;
+    barrier();
+
+    for (uint stride = 64; stride > 0; stride >>= 1) {
+        if (d < stride) {
+            sum_vals[d] += sum_vals[d + stride];
+        }
+        barrier();
+    }
+
+    const float rms = inversesqrt(sum_vals[0] / float(pc.head_dim) + pc.eps);
+    const float norm_scale = is_q ? q_norm_weight[d] : k_norm_weight[d];
+    const float scaled = acc * rms * norm_scale;
+    raw_vals[d] = scaled;
+    barrier();
+
+    const uint half_dim = pc.head_dim / 2u;
+    const uint pair = d < half_dim ? d : (d - half_dim);
+    const float theta = float(tok) * pow(pc.theta_scale, float(pair));
+    const float c = cos(theta);
+    const float s = sin(theta);
+    const float x0 = raw_vals[pair];
+    const float x1 = raw_vals[pair + half_dim];
+    const float out_val = d < half_dim ? (x0 * c - x1 * s) : (x0 * s + x1 * c);
+
+    if (is_q) {
+        const uint out_index = tok * (pc.n_head * pc.head_dim) + head * pc.head_dim + d;
+        q_out[out_index] = out_val;
+    } else {
+        const uint out_index = tok * (pc.n_kv_head * pc.head_dim) + head * pc.head_dim + d;
+        k_out[out_index] = out_val;
+    }
+}

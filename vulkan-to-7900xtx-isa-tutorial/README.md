@@ -30,6 +30,16 @@
   最小 exact FlashAttention forward。用 `tile + online softmax` 对照 naive attention，真正把 FlashAttention 的前向主循环跑起来。
 - `ch09`
   最小 SageAttention forward。实现 `smooth_k + qk_int8 + pv_fp16`，再和 exact FlashAttention 做直接对比。
+- `ch10`
+  官方 `ggml` Vulkan backend。把 `ggml_mul_mat` 图节点、`ggml-vulkan` 官方 shader、`.rgp` 和 AMDGPU ISA 串起来。
+- `ch11`
+  官方 `whisper.cpp` + `ggml` Vulkan backend。先把 `tiny.en` ASR 跑通，再转到 encoder/attention 热点调优。
+- `ch12`
+  官方 `OmniVoice` + `PyTorch ROCm`。在 AMD GPU 上生成一段英语语音，再用 `Whisper tiny.en` 做 ASR 回验。
+- `ch13`
+  **Vulkan-first** 的 `ggml` OmniVoice iterative decode。用官方 OmniVoice 导出参考，再用 `ggml-vulkan` 在 `RX 7900 XTX` 上生成 `ggml` token，并把 token 解码成 `wav` 做 ASR 回验。
+- `ch13-old`
+  旧的实验性 bridge / CPU-fallback 版本，保留早期 `ggml` replay 与数值对齐探索过程。
 
 ## Chapter Layout
 
